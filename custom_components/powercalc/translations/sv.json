@@ -22,7 +22,9 @@
       "lut_unsupported_color_mode": "LUT profilen stöder inte ett av färglägena på din lampa. Se loggen för mer information",
       "lut_wrong_domain": "Enbart lampentiteter kan använda LUT läge",
       "playbook_mandatory": "Du måste speciifera minst en playbook",
-      "unknown": "Okänt fel inträffade, se loggen för mer information"
+      "unknown": "Okänt fel inträffade, se loggen för mer information",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "flow_title": "{name} ({manufacturer} {model})",
     "step": {
@@ -274,14 +276,16 @@
               "force_calculate_group_energy": "Tvinga energiberäkning",
               "group_energy_start_at_zero": "Börja på noll",
               "create_energy_sensor": "Skapa energisensor",
-              "create_utility_meters": "Skapa bruksmätare"
+              "create_utility_meters": "Skapa bruksmätare",
+              "group_energy_import_history": "Import energy long-term statistics from sources once"
             },
             "data_description": {
               "device": "Lägg till de grupperade entiteterna Powercalc skapar till en existerande enhet.",
               "include_non_powercalc_sensors": "Ange huruvida icke-powercalc-sensorer ska inkluderas när områdesalternativet används",
               "force_calculate_group_energy": "Som standard summerar powercalc energisensorerna från medlemssensorerna. Växla detta alternativ för att tvinga fram en Riemann Sum-sensor",
               "group_energy_start_at_zero": "När den är aktiverad startar energisensorn vid noll när sensorn skapas. Annars kommer den att summera alla aktuella medlemsenergisensortillstånd",
-              "create_energy_sensor": "Om powercalc ska skapa en kWh sensor"
+              "create_energy_sensor": "Om powercalc ska skapa en kWh sensor",
+              "group_energy_import_history": "Creates a shared historical consumption curve from the existing consumption statistics of the selected sources. The original data is preserved. Missing measurements cannot be reconstructed. Disable Start at zero to use this option."
             }
           }
         },
@@ -704,6 +708,14 @@
         }
       },
       "title": "Val av underprofil krävs för {entry}"
+    },
+    "group_history_failed": {
+      "title": "History import for {entity} could not be completed",
+      "description": "The group publishes no energy value to prevent incorrect consumption statistics. Reason: {error}\n\nResolve the cause and reload the integration to resume the import. Original source statistics remain unchanged."
+    },
+    "group_history_partial": {
+      "title": "History for {entity} is incomplete",
+      "description": "The import completed, but {intervals} intervals have missing source contributions. Only consumption between adjacent known source statistics was included. Gaps and first observations do not establish measured zero consumption. Consumption across gaps was omitted, not distributed. The group total can therefore be lower than the actual consumption."
     }
   },
   "options": {
@@ -717,7 +729,9 @@
       "linear_mandatory": "Du måste ange minst en av max_effekt eller kalibrera",
       "linear_min_higher_as_max": "Max effekt kan inte vara lägre än min effekt",
       "linear_unsupported_domain": "Entitetsdomän stöds inte i linjärläge. Måste vara en av följande: fläkt, ljus eller mediaplayer. Du kan dock använda kalibreringsalternativet",
-      "unknown": "Okänt fel inträffade, se loggen för mer information"
+      "unknown": "Okänt fel inträffade, se loggen för mer information",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "step": {
       "advanced_options": {

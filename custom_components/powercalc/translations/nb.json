@@ -22,7 +22,9 @@
       "lut_unsupported_color_mode": "LUT-profilen støtter ikke én av fargemodusene til lyset ditt. Se loggen for mer informasjon",
       "lut_wrong_domain": "Bare entiteter i light-domenet kan bruke LUT-modus",
       "playbook_mandatory": "Du må oppgi minst én playbook",
-      "unknown": "Ukjent feil oppstod. Se loggen for mer informasjon"
+      "unknown": "Ukjent feil oppstod. Se loggen for mer informasjon",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "flow_title": "{name} ({manufacturer} {model})",
     "step": {
@@ -274,14 +276,16 @@
               "force_calculate_group_energy": "Tving energiberegning",
               "group_energy_start_at_zero": "Start på null",
               "create_energy_sensor": "Opprett energisensor",
-              "create_utility_meters": "Opprett forbruksmålere"
+              "create_utility_meters": "Opprett forbruksmålere",
+              "group_energy_import_history": "Import energy long-term statistics from sources once"
             },
             "data_description": {
               "device": "Legg til gruppeentitetene Powercalc oppretter, på en eksisterende enhet",
               "include_non_powercalc_sensors": "Kontroller om ikke-Powercalc-sensorer skal inkluderes når du bruker områdealternativet",
               "force_calculate_group_energy": "Som standard summerer Powercalc energisensorene fra medlemssensorene. Slå på dette alternativet for å tvinge frem en Riemann-sum-sensor",
               "group_energy_start_at_zero": "Når dette er aktivert, starter energisensoren på null når den opprettes. Ellers summeres de gjeldende tilstandene til alle energisensorene som er medlemmer",
-              "create_energy_sensor": "Om Powercalc trenger å lage en kWh-sensor"
+              "create_energy_sensor": "Om Powercalc trenger å lage en kWh-sensor",
+              "group_energy_import_history": "Creates a shared historical consumption curve from the existing consumption statistics of the selected sources. The original data is preserved. Missing measurements cannot be reconstructed. Disable Start at zero to use this option."
             }
           }
         },
@@ -704,6 +708,14 @@
         }
       },
       "title": "Underprofilvalg kreves for {entry}"
+    },
+    "group_history_failed": {
+      "title": "History import for {entity} could not be completed",
+      "description": "The group publishes no energy value to prevent incorrect consumption statistics. Reason: {error}\n\nResolve the cause and reload the integration to resume the import. Original source statistics remain unchanged."
+    },
+    "group_history_partial": {
+      "title": "History for {entity} is incomplete",
+      "description": "The import completed, but {intervals} intervals have missing source contributions. Only consumption between adjacent known source statistics was included. Gaps and first observations do not establish measured zero consumption. Consumption across gaps was omitted, not distributed. The group total can therefore be lower than the actual consumption."
     }
   },
   "options": {
@@ -717,7 +729,9 @@
       "linear_mandatory": "Du må oppgi minst én av max_power eller calibrate",
       "linear_min_higher_as_max": "Maks effekt kan ikke være lavere enn min effekt",
       "linear_unsupported_domain": "Entitetsdomenet støttes ikke i lineær modus. Det må være ett av følgende: fan, light eller media_player. Du kan likevel bruke calibrate",
-      "unknown": "Ukjent feil oppstod. Se loggene for mer informasjon"
+      "unknown": "Ukjent feil oppstod. Se loggene for mer informasjon",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "step": {
       "advanced_options": {

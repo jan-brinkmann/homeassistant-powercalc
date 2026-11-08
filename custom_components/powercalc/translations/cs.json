@@ -22,7 +22,9 @@
       "lut_unsupported_color_mode": "Profil LUT nepodporuje jeden z barevných režimů vašeho světla. Další informace najdete v protokolech",
       "lut_wrong_domain": "Režim LUT mohou používat pouze entity světel",
       "playbook_mandatory": "Musíte zadat alespoň jeden playbook",
-      "unknown": "Došlo k neznámé chybě, další informace najdete v protokolech"
+      "unknown": "Došlo k neznámé chybě, další informace najdete v protokolech",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "flow_title": "{name} ({manufacturer} {model})",
     "step": {
@@ -274,14 +276,16 @@
               "force_calculate_group_energy": "Vynutit výpočet energie",
               "group_energy_start_at_zero": "Začít na nule",
               "create_energy_sensor": "Vytvořit senzor energie",
-              "create_utility_meters": "Vytvořit měřiče spotřeby"
+              "create_utility_meters": "Vytvořit měřiče spotřeby",
+              "group_energy_import_history": "Import energy long-term statistics from sources once"
             },
             "data_description": {
               "device": "Přidat skupinové entity vytvořené Powercalc k existujícímu zařízení",
               "include_non_powercalc_sensors": "Určete, zda při použití možnosti oblasti zahrnout i senzory mimo Powercalc",
               "force_calculate_group_energy": "Ve výchozím nastavení Powercalc sčítá senzory energie z členských senzorů. Zapnutím této možnosti vynutíte vytvoření senzoru Riemannova součtu",
               "group_energy_start_at_zero": "Když je povoleno, senzor energie začne při vytvoření na nule. Jinak se sečtou všechny aktuální stavy členských senzorů energie",
-              "create_energy_sensor": "Zda má Powercalc vytvořit senzor kWh"
+              "create_energy_sensor": "Zda má Powercalc vytvořit senzor kWh",
+              "group_energy_import_history": "Creates a shared historical consumption curve from the existing consumption statistics of the selected sources. The original data is preserved. Missing measurements cannot be reconstructed. Disable Start at zero to use this option."
             }
           }
         },
@@ -704,6 +708,14 @@
         }
       },
       "title": "Pro {entry} je vyžadován výběr podprofilu"
+    },
+    "group_history_failed": {
+      "title": "History import for {entity} could not be completed",
+      "description": "The group publishes no energy value to prevent incorrect consumption statistics. Reason: {error}\n\nResolve the cause and reload the integration to resume the import. Original source statistics remain unchanged."
+    },
+    "group_history_partial": {
+      "title": "History for {entity} is incomplete",
+      "description": "The import completed, but {intervals} intervals have missing source contributions. Only consumption between adjacent known source statistics was included. Gaps and first observations do not establish measured zero consumption. Consumption across gaps was omitted, not distributed. The group total can therefore be lower than the actual consumption."
     }
   },
   "options": {
@@ -717,7 +729,9 @@
       "linear_mandatory": "Musíte zadat alespoň jednu z možností max_power nebo calibrate",
       "linear_min_higher_as_max": "Maximální spotřeba nebůže být nižší, nežli minimální spotřeba",
       "linear_unsupported_domain": "Doména entity není pro lineární režim podporována. Musí být jedna z: fan, light nebo mediaplayer. Můžete však použít možnost calibrate",
-      "unknown": "Došlo k neznámé chybě. Více informací najdete v logu"
+      "unknown": "Došlo k neznámé chybě. Více informací najdete v logu",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "step": {
       "advanced_options": {

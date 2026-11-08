@@ -64,6 +64,7 @@ nav:
       - 'Group':
          - 'sensor-types/group/index.md'
          - 'sensor-types/group/custom.md'
+         - 'sensor-types/group/energy-history.md'
          - 'sensor-types/group/domain.md'
          - 'sensor-types/group/subtract.md'
          - 'sensor-types/group/standby.md'

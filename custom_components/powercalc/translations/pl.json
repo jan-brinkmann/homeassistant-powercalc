@@ -22,7 +22,9 @@
       "lut_unsupported_color_mode": "Profil LUT nie obsługuje jednego z trybów kolorów Twojego światła. Zobacz logi, aby uzyskać więcej informacji",
       "lut_wrong_domain": "Tylko encje świateł mogą korzystać z trybu LUT",
       "playbook_mandatory": "Musisz podać co najmniej jeden playbook",
-      "unknown": "Wystąpił nieznany błąd, sprawdź logi, aby uzyskać dodatkowe informacje"
+      "unknown": "Wystąpił nieznany błąd, sprawdź logi, aby uzyskać dodatkowe informacje",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "flow_title": "{name} ({manufacturer} {model})",
     "step": {
@@ -274,14 +276,16 @@
               "force_calculate_group_energy": "Wymuś obliczanie energii",
               "group_energy_start_at_zero": "Zacznij od zera",
               "create_energy_sensor": "Utwórz sensor energii",
-              "create_utility_meters": "Utwórz liczniki mediów"
+              "create_utility_meters": "Utwórz liczniki mediów",
+              "group_energy_import_history": "Import energy long-term statistics from sources once"
             },
             "data_description": {
               "device": "Dodaj encje grupy utworzone przez Powercalc dla istniejącego urządzenia",
               "include_non_powercalc_sensors": "Zdecyduj, czy dołączyć czujniki nie-Powercalc podczas korzystania z opcji obszaru",
               "force_calculate_group_energy": "Domyślnie sensory energi Powercalc sumuje z sensorów członków. Przełącz tę opcję, aby wymusić stworzenie sensora Suma Riemanna",
               "group_energy_start_at_zero": "Gdy włączone, sensor energii zacznie się od zera przy utworzeniu tego sensora. W przeciwnym razie zsumowane będą wszystkie aktualne stany sensorów energii",
-              "create_energy_sensor": "Czy Powercalc musi utworzyć czujnik kWh"
+              "create_energy_sensor": "Czy Powercalc musi utworzyć czujnik kWh",
+              "group_energy_import_history": "Creates a shared historical consumption curve from the existing consumption statistics of the selected sources. The original data is preserved. Missing measurements cannot be reconstructed. Disable Start at zero to use this option."
             }
           }
         },
@@ -704,6 +708,14 @@
         }
       },
       "title": "Wybór podprofilu jest wymagany dla {entry}"
+    },
+    "group_history_failed": {
+      "title": "History import for {entity} could not be completed",
+      "description": "The group publishes no energy value to prevent incorrect consumption statistics. Reason: {error}\n\nResolve the cause and reload the integration to resume the import. Original source statistics remain unchanged."
+    },
+    "group_history_partial": {
+      "title": "History for {entity} is incomplete",
+      "description": "The import completed, but {intervals} intervals have missing source contributions. Only consumption between adjacent known source statistics was included. Gaps and first observations do not establish measured zero consumption. Consumption across gaps was omitted, not distributed. The group total can therefore be lower than the actual consumption."
     }
   },
   "options": {
@@ -717,7 +729,9 @@
       "linear_mandatory": "Musisz dostarczyć co najmniej jedno z: Maksymalna moc lub Kalibracja",
       "linear_min_higher_as_max": "Maksymalna moc nie może być mniejsza niż Minimalna moc",
       "linear_unsupported_domain": "Domena encji nie jest obsługiwana w trybie liniowym. Musi być jedną z: 'fan', 'light' lub 'mediaplayer'. Możesz jednak użyć opcji kalibracji",
-      "unknown": "Wystąpił nieznany błąd, sprawdź logi, aby uzyskać dodatkowe informacje"
+      "unknown": "Wystąpił nieznany błąd, sprawdź logi, aby uzyskać dodatkowe informacje",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "step": {
       "advanced_options": {

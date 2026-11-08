@@ -22,7 +22,9 @@
       "lut_unsupported_color_mode": "Profilul LUT nu acceptă unul dintre modurile de culoare ale luminii dumneavoastră. Consultați jurnalele pentru mai multe informații",
       "lut_wrong_domain": "Numai entitățile luminoase pot folosi modul LUT",
       "playbook_mandatory": "Trebuie să specificați cel puțin un playbook",
-      "unknown": "A apărut o eroare necunoscută, vă rugăm să consultați jurnalele pentru informații suplimentare"
+      "unknown": "A apărut o eroare necunoscută, vă rugăm să consultați jurnalele pentru informații suplimentare",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "flow_title": "{name} ({manufacturer} {model})",
     "step": {
@@ -274,14 +276,16 @@
               "force_calculate_group_energy": "Forțează calcularea energiei",
               "group_energy_start_at_zero": "Începe de la zero",
               "create_energy_sensor": "Creați un senzor de energie",
-              "create_utility_meters": "Creați contoare"
+              "create_utility_meters": "Creați contoare",
+              "group_energy_import_history": "Import energy long-term statistics from sources once"
             },
             "data_description": {
               "device": "Adăugați entitățile de grup pe care powercalc le creează pe un dispozitiv existent",
               "include_non_powercalc_sensors": "Controlați dacă includeți senzori non-powercalc atunci când utilizați opțiunea zonă",
               "force_calculate_group_energy": "În mod implicit, Powercalc însumează senzorii de energie ai senzorilor membri. Activați această opțiune pentru a forța crearea unui senzor Riemann Sum",
               "group_energy_start_at_zero": "Când este activat, senzorul de energie va porni la zero când senzorul este creat. În caz contrar, va însuma toate stările actuale ale senzorilor de energie membri",
-              "create_energy_sensor": "Dacă Powercalc trebuie să creeze un senzor kWh"
+              "create_energy_sensor": "Dacă Powercalc trebuie să creeze un senzor kWh",
+              "group_energy_import_history": "Creates a shared historical consumption curve from the existing consumption statistics of the selected sources. The original data is preserved. Missing measurements cannot be reconstructed. Disable Start at zero to use this option."
             }
           }
         },
@@ -704,6 +708,14 @@
         }
       },
       "title": "Selecția de subprofil este necesară pentru {entry}"
+    },
+    "group_history_failed": {
+      "title": "History import for {entity} could not be completed",
+      "description": "The group publishes no energy value to prevent incorrect consumption statistics. Reason: {error}\n\nResolve the cause and reload the integration to resume the import. Original source statistics remain unchanged."
+    },
+    "group_history_partial": {
+      "title": "History for {entity} is incomplete",
+      "description": "The import completed, but {intervals} intervals have missing source contributions. Only consumption between adjacent known source statistics was included. Gaps and first observations do not establish measured zero consumption. Consumption across gaps was omitted, not distributed. The group total can therefore be lower than the actual consumption."
     }
   },
   "options": {
@@ -717,7 +729,9 @@
       "linear_mandatory": "Trebuie să furnizați cel puțin unul dintre max_power sau să calibrați",
       "linear_min_higher_as_max": "Puterea maximă nu poate fi mai mică decât puterea minimă",
       "linear_unsupported_domain": "Domeniul entității nu este acceptat pentru modul liniar. Trebuie să fie unul dintre: fan, light sau mediaplayer. Cu toate acestea, puteți utiliza opțiunea de calibrare",
-      "unknown": "A apărut o eroare necunoscută, vă rugăm să consultați jurnalele pentru informații suplimentare"
+      "unknown": "A apărut o eroare necunoscută, vă rugăm să consultați jurnalele pentru informații suplimentare",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "step": {
       "advanced_options": {

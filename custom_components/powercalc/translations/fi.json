@@ -22,7 +22,9 @@
       "lut_unsupported_color_mode": "LUT-profiili ei tue yhtä valosi väritiloista. Katso lisätietoja lokista",
       "lut_wrong_domain": "Vain light-entiteetit voivat käyttää LUT-tilaa",
       "playbook_mandatory": "Määritä vähintään yksi playbook",
-      "unknown": "Tuntematon virhe. Katso lisätietoja lokista"
+      "unknown": "Tuntematon virhe. Katso lisätietoja lokista",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "flow_title": "{name} ({manufacturer} {model})",
     "step": {
@@ -274,14 +276,16 @@
               "force_calculate_group_energy": "Pakota energian laskenta",
               "group_energy_start_at_zero": "Aloita nollasta",
               "create_energy_sensor": "Luo energia-anturi",
-              "create_utility_meters": "Luo kulutusmittarit"
+              "create_utility_meters": "Luo kulutusmittarit",
+              "group_energy_import_history": "Import energy long-term statistics from sources once"
             },
             "data_description": {
               "device": "Lisää Powercalcin luomat ryhmäentiteetit olemassa olevaan laitteeseen",
               "include_non_powercalc_sensors": "Määritä, sisällytetäänkö muut kuin Powercalc-anturit aluevaihtoehtoa käytettäessä",
               "force_calculate_group_energy": "Oletuksena Powercalc summaa jäsenantureiden energia-anturit. Ota tämä asetus käyttöön, jos haluat pakottaa luomaan Riemannin summa-anturin",
               "group_energy_start_at_zero": "Kun tämä on käytössä, energia-anturi käynnistyy nollasta, kun anturi luodaan. Muussa tapauksessa se summaa kaikki nykyiset jäsenten energia-anturin tilat",
-              "create_energy_sensor": "Määrittää, luoko Powercalc kWh-anturin"
+              "create_energy_sensor": "Määrittää, luoko Powercalc kWh-anturin",
+              "group_energy_import_history": "Creates a shared historical consumption curve from the existing consumption statistics of the selected sources. The original data is preserved. Missing measurements cannot be reconstructed. Disable Start at zero to use this option."
             }
           }
         },
@@ -704,6 +708,14 @@
         }
       },
       "title": "Alaprofiilin valinta vaaditaan mallille {entry}"
+    },
+    "group_history_failed": {
+      "title": "History import for {entity} could not be completed",
+      "description": "The group publishes no energy value to prevent incorrect consumption statistics. Reason: {error}\n\nResolve the cause and reload the integration to resume the import. Original source statistics remain unchanged."
+    },
+    "group_history_partial": {
+      "title": "History for {entity} is incomplete",
+      "description": "The import completed, but {intervals} intervals have missing source contributions. Only consumption between adjacent known source statistics was included. Gaps and first observations do not establish measured zero consumption. Consumption across gaps was omitted, not distributed. The group total can therefore be lower than the actual consumption."
     }
   },
   "options": {
@@ -717,7 +729,9 @@
       "linear_mandatory": "Anna vähintään max_power tai calibrate",
       "linear_min_higher_as_max": "Enimmäisteho ei voi olla pienempi kuin vähimmäisteho",
       "linear_unsupported_domain": "Entiteetin toimialuetta ei tueta lineaarisessa tilassa. Sen on oltava fan, light tai media_player. Voit kuitenkin käyttää calibrate-asetusta",
-      "unknown": "Tapahtui tuntematon virhe, katso lisätietoja lokeista"
+      "unknown": "Tapahtui tuntematon virhe, katso lisätietoja lokeista",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "step": {
       "advanced_options": {

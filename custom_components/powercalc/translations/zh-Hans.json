@@ -22,7 +22,9 @@
       "lut_unsupported_color_mode": "LUT 配置文件不支持灯具的一种颜色模式。详情请查看日志",
       "lut_wrong_domain": "只有 light 实体可以使用 LUT 模式",
       "playbook_mandatory": "必须指定至少一个运行方案 (playbook)",
-      "unknown": "发生未知错误，详情请查看日志"
+      "unknown": "发生未知错误，详情请查看日志",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "flow_title": "{name} ({manufacturer} {model})",
     "step": {
@@ -274,14 +276,16 @@
               "force_calculate_group_energy": "强制计算能源",
               "group_energy_start_at_zero": "从零开始",
               "create_energy_sensor": "创建能源传感器",
-              "create_utility_meters": "创建公用事业计量表"
+              "create_utility_meters": "创建公用事业计量表",
+              "group_energy_import_history": "Import energy long-term statistics from sources once"
             },
             "data_description": {
               "device": "将 Powercalc 创建的组实体添加到现有设备",
               "include_non_powercalc_sensors": "控制使用区域选项时是否包括非 Powercalc 传感器",
               "force_calculate_group_energy": "默认情况下，Powercalc 会汇总成员的能源传感器。启用此选项可强制创建黎曼和积分传感器",
               "group_energy_start_at_zero": "启用后，能源传感器在创建时将从零开始。否则，它会汇总所有成员能源传感器的当前状态值",
-              "create_energy_sensor": "是否让 Powercalc 创建 kWh 传感器"
+              "create_energy_sensor": "是否让 Powercalc 创建 kWh 传感器",
+              "group_energy_import_history": "Creates a shared historical consumption curve from the existing consumption statistics of the selected sources. The original data is preserved. Missing measurements cannot be reconstructed. Disable Start at zero to use this option."
             }
           }
         },
@@ -704,6 +708,14 @@
         }
       },
       "title": "{entry} 需要选择子配置文件"
+    },
+    "group_history_failed": {
+      "title": "History import for {entity} could not be completed",
+      "description": "The group publishes no energy value to prevent incorrect consumption statistics. Reason: {error}\n\nResolve the cause and reload the integration to resume the import. Original source statistics remain unchanged."
+    },
+    "group_history_partial": {
+      "title": "History for {entity} is incomplete",
+      "description": "The import completed, but {intervals} intervals have missing source contributions. Only consumption between adjacent known source statistics was included. Gaps and first observations do not establish measured zero consumption. Consumption across gaps was omitted, not distributed. The group total can therefore be lower than the actual consumption."
     }
   },
   "options": {
@@ -717,7 +729,9 @@
       "linear_mandatory": "必须至少提供 max_power 或 calibrate 中的一项",
       "linear_min_higher_as_max": "最大功率不能低于最小功率",
       "linear_unsupported_domain": "线性模式不支持此实体域。必须是 fan、light 或 mediaplayer 之一，但仍可使用 calibrate 选项",
-      "unknown": "发生未知错误，详情请查看日志"
+      "unknown": "发生未知错误，详情请查看日志",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "step": {
       "advanced_options": {

@@ -22,7 +22,9 @@
       "lut_unsupported_color_mode": "Das LUT-Profil unterstützt einen der Farbmodi Ihres Lichts nicht. Siehe in die Logs für weitere Informationen",
       "lut_wrong_domain": "Nur Licht Entitäten können den LUT Modus verwenden",
       "playbook_mandatory": "Sie müssen mindestens ein Playbook angeben",
-      "unknown": "Unbekannter Fehler aufgetreten, bitte sehen in die Logs für weitere Informationen"
+      "unknown": "Unbekannter Fehler aufgetreten, bitte sehen in die Logs für weitere Informationen",
+      "group_history_requires_energy": "Die Historienübernahme benötigt einen Energiesensor und ist mit der erzwungenen Energieberechnung nicht kombinierbar.",
+      "group_history_start_at_zero": "Deaktiviere „Bei null beginnen“, um die Historie zu übernehmen. Die Gruppe beginnt mit der übernommenen Verbrauchssumme."
     },
     "flow_title": "{name} ({manufacturer} {model})",
     "step": {
@@ -274,14 +276,16 @@
               "force_calculate_group_energy": "Erzwinge Berechnung der Energie",
               "group_energy_start_at_zero": "Starte bei Null",
               "create_energy_sensor": "Energiesensor erstellen",
-              "create_utility_meters": "Utilitymeter erstellen"
+              "create_utility_meters": "Utilitymeter erstellen",
+              "group_energy_import_history": "Energie-Langzeitstatistiken der Quellen einmalig übernehmen"
             },
             "data_description": {
               "device": "Füge die von Powercalc erstellten Gruppenentitäten einem bestehenden Gerät hinzu",
               "include_non_powercalc_sensors": "Lege fest, ob nicht-powercalc-Sensoren bei Verwendung der Bereichs-Option mit einbezogen werden sollen",
               "force_calculate_group_energy": "Standardmäßig summiert Powercalc die Energiesensoren der Mitgliedssensoren. Schalten Sie diese Option um, um die Erstellung eines Riemann Summen Sensors zu erzwingen",
               "group_energy_start_at_zero": "Wenn aktiviert, wird der Energiesensor bei Null gestartet, wenn der Sensor erstellt wird. Andernfalls wird er den Status aller aktuellen Energiesensoren Mitglieder summieren",
-              "create_energy_sensor": "Ob powercalc einen kWh Sensor erstellen muss"
+              "create_energy_sensor": "Ob powercalc einen kWh Sensor erstellen muss",
+              "group_energy_import_history": "Erstellt aus den vorhandenen Verbrauchsstatistiken der ausgewählten Quellen eine gemeinsame historische Verbrauchskurve. Die Originaldaten bleiben erhalten. Fehlende Messdaten können nicht rekonstruiert werden. Deaktiviere dafür „Bei null beginnen“."
             }
           }
         },
@@ -704,6 +708,14 @@
         }
       },
       "title": "Unterprofil-Auswahl für {entry} erforderlich"
+    },
+    "group_history_failed": {
+      "title": "Historienübernahme für {entity} konnte nicht abgeschlossen werden",
+      "description": "Die Gruppe liefert keinen Energiewert, um fehlerhafte Verbrauchsstatistiken zu verhindern. Ursache: {error}\n\nBehebe die Ursache und lade die Integration neu, um die Übernahme fortzusetzen. Die ursprünglichen Quellstatistiken bleiben unverändert."
+    },
+    "group_history_partial": {
+      "title": "Die Historie von {entity} ist unvollständig",
+      "description": "Die Übernahme wurde abgeschlossen, aber in {intervals} Intervallen fehlen Beiträge einzelner Quellen. Übernommen wurde nur Verbrauch zwischen unmittelbar aufeinanderfolgenden bekannten Quellstatistiken. Lücken und erste Messpunkte belegen keinen Nullverbrauch. Verbrauch über Lücken hinweg wurde ausgelassen und nicht verteilt. Der Gruppenzähler kann daher unter dem tatsächlichen Verbrauch liegen."
     }
   },
   "options": {
@@ -717,7 +729,9 @@
       "linear_mandatory": "Sie müssen mindestens Maximale Leistung oder Kalibrierung angeben",
       "linear_min_higher_as_max": "Maximale Leistung kann nicht niedriger sein als Minimale Leistung",
       "linear_unsupported_domain": "Domäne der Entität wird für den linearen Modus nicht unterstützt. Muss einer der folgenden Werte sein: Ventilator, Licht oder Mediaplayer. Sie können jedoch die Kalibrierungsoption verwenden",
-      "unknown": "Unbekannter Fehler aufgetreten, bitte sehe in die Logs für weitere Informationen"
+      "unknown": "Unbekannter Fehler aufgetreten, bitte sehe in die Logs für weitere Informationen",
+      "group_history_requires_energy": "Die Historienübernahme benötigt einen Energiesensor und ist mit der erzwungenen Energieberechnung nicht kombinierbar.",
+      "group_history_start_at_zero": "Deaktiviere „Bei null beginnen“, um die Historie zu übernehmen. Die Gruppe beginnt mit der übernommenen Verbrauchssumme."
     },
     "step": {
       "advanced_options": {

@@ -22,7 +22,9 @@
       "lut_unsupported_color_mode": "Le profil LUT ne prend pas en charge l'un des modes de couleur de votre lumière. Voir les journaux pour plus d'informations",
       "lut_wrong_domain": "Seules les entités lumineuses peuvent utiliser le mode LUT",
       "playbook_mandatory": "Vous devez spécifier au moins un playbook",
-      "unknown": "Une erreur inconnue s'est produite, veuillez consulter les journaux pour plus d'informations"
+      "unknown": "Une erreur inconnue s'est produite, veuillez consulter les journaux pour plus d'informations",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "flow_title": "{name} ({manufacturer} {model})",
     "step": {
@@ -274,14 +276,16 @@
               "force_calculate_group_energy": "Forcer le calcul de l'énergie",
               "group_energy_start_at_zero": "Commencer à zéro",
               "create_energy_sensor": "Créer un capteur d'énergie",
-              "create_utility_meters": "Créer des compteurs d'électricité"
+              "create_utility_meters": "Créer des compteurs d'électricité",
+              "group_energy_import_history": "Import energy long-term statistics from sources once"
             },
             "data_description": {
               "device": "Ajouter les entités de groupe créées par Powercalc à un appareil existant",
               "include_non_powercalc_sensors": "Contrôler s'il faut inclure les capteurs non Powercalc lors de l'utilisation de l'option de zone",
               "force_calculate_group_energy": "Par défaut, Powercalc additionne les capteurs d'énergie des capteurs membres. Activez cette option pour forcer la création d'un capteur de somme de Riemann",
               "group_energy_start_at_zero": "Lorsque cette option est activée, le capteur d'énergie commencera à zéro lors de sa création. Sinon, il additionnera tous les états actuels des capteurs d'énergie membres",
-              "create_energy_sensor": "Indique si Powercalc doit créer un capteur kWh"
+              "create_energy_sensor": "Indique si Powercalc doit créer un capteur kWh",
+              "group_energy_import_history": "Creates a shared historical consumption curve from the existing consumption statistics of the selected sources. The original data is preserved. Missing measurements cannot be reconstructed. Disable Start at zero to use this option."
             }
           }
         },
@@ -704,6 +708,14 @@
         }
       },
       "title": "Sélection du sous-profil requise pour {entry}"
+    },
+    "group_history_failed": {
+      "title": "History import for {entity} could not be completed",
+      "description": "The group publishes no energy value to prevent incorrect consumption statistics. Reason: {error}\n\nResolve the cause and reload the integration to resume the import. Original source statistics remain unchanged."
+    },
+    "group_history_partial": {
+      "title": "History for {entity} is incomplete",
+      "description": "The import completed, but {intervals} intervals have missing source contributions. Only consumption between adjacent known source statistics was included. Gaps and first observations do not establish measured zero consumption. Consumption across gaps was omitted, not distributed. The group total can therefore be lower than the actual consumption."
     }
   },
   "options": {
@@ -717,7 +729,9 @@
       "linear_mandatory": "Vous devez spécifier au moins la puissance minimale ou la valeur d'étalonnage",
       "linear_min_higher_as_max": "La puissance maximale ne peut pas être inférieure à la puissance minimale",
       "linear_unsupported_domain": "Domaine d'entité non pris en charge pour le mode linéaire. Doit être l'un des suivants : ventilateur, lumière ou lecteur multimédia. Vous pouvez cependant utiliser l'option de calibrage",
-      "unknown": "Une erreur inconnue s'est produite, veuillez consulter les journaux pour plus d'informations"
+      "unknown": "Une erreur inconnue s'est produite, veuillez consulter les journaux pour plus d'informations",
+      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
+      "group_history_start_at_zero": "Disable Start at zero to import history. The group will start with the imported consumption total."
     },
     "step": {
       "advanced_options": {

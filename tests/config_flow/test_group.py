@@ -16,6 +16,7 @@ from homeassistant.helpers.area_registry import AreaRegistry
 from homeassistant.helpers.floor_registry import FloorRegistry
 from homeassistant.helpers.selector import SelectSelector
 from homeassistant.helpers.translation import async_get_translations
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 import voluptuous as vol
 
@@ -32,6 +33,7 @@ from custom_components.powercalc.const import (
     CONF_FORCE_CALCULATE_GROUP_ENERGY,
     CONF_GROUP,
     CONF_GROUP_ENERGY_ENTITIES,
+    CONF_GROUP_ENERGY_IMPORT_HISTORY,
     CONF_GROUP_ENERGY_START_AT_ZERO,
     CONF_GROUP_MEMBER_DEVICES,
     CONF_GROUP_MEMBER_SENSORS,
@@ -75,6 +77,7 @@ from tests.config_flow.common import (
     select_menu_item,
     set_virtual_power_configuration,
     submit_form_step,
+    submit_options_step,
 )
 
 
@@ -103,6 +106,50 @@ async def test_create_group_entry(hass: HomeAssistant) -> None:
     }
 
     assert hass.states.get("sensor.my_group_sensor_power")
+
+
+@pytest.mark.parametrize(
+    "options,error",
+    [
+        ({CONF_GROUP_ENERGY_START_AT_ZERO: True}, "group_history_start_at_zero"),
+        ({CONF_FORCE_CALCULATE_GROUP_ENERGY: True}, "group_history_requires_energy"),
+        ({CONF_CREATE_ENERGY_SENSOR: False}, "group_history_requires_energy"),
+    ],
+)
+async def test_history_import_rejects_conflicting_options(
+    hass: HomeAssistant, options: dict[str, bool], error: str
+) -> None:
+    result = await select_menu_item(hass, Step.MENU_GROUP, Step.GROUP_CUSTOM)
+    result = await submit_form_step(
+        hass,
+        result,
+        {
+            CONF_NAME: "History",
+            CONF_GROUP_ENERGY_ENTITIES: ["sensor.energy"],
+            CONF_GROUP_ENERGY_IMPORT_HISTORY: True,
+            CONF_GROUP_ENERGY_START_AT_ZERO: False,
+            **options,
+        },
+    )
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["errors"] == {"base": error}
+
+
+async def test_history_import_prevents_force_calculation_in_options(hass: HomeAssistant) -> None:
+    entry = await create_mock_group_entry(
+        hass,
+        "History",
+        {
+            CONF_GROUP_TYPE: GroupType.CUSTOM,
+            CONF_GROUP_ENERGY_ENTITIES: ["sensor.energy"],
+            CONF_GROUP_ENERGY_IMPORT_HISTORY: True,
+            CONF_GROUP_ENERGY_START_AT_ZERO: False,
+        },
+        setup=False,
+    )
+    result = await initialize_options_flow(hass, entry, Step.GROUP_CUSTOM)
+    result = await submit_options_step(hass, result, {CONF_FORCE_CALCULATE_GROUP_ENERGY: True})
+    assert result["errors"] == {"base": "group_history_requires_energy"}
 
 
 async def test_create_group_entry_without_unique_id(hass: HomeAssistant) -> None:

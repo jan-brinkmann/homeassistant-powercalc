@@ -35,7 +35,7 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import entity_registry as er, start
+from homeassistant.helpers import entity_registry as er, issue_registry as ir, start
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import (
     EventStateChangedData,
@@ -66,6 +66,7 @@ from custom_components.powercalc.const import (
     CONF_FLOOR,
     CONF_FORCE_CALCULATE_GROUP_ENERGY,
     CONF_GROUP_ENERGY_ENTITIES,
+    CONF_GROUP_ENERGY_IMPORT_HISTORY,
     CONF_GROUP_ENERGY_START_AT_ZERO,
     CONF_GROUP_ENERGY_UPDATE_INTERVAL,
     CONF_GROUP_MEMBER_DEVICES,
@@ -96,6 +97,7 @@ from custom_components.powercalc.const import (
     SensorType,
     UnitPrefix,
 )
+from custom_components.powercalc.errors import SensorConfigurationError
 from custom_components.powercalc.group_include.filter import (
     AreaFilter,
     CompositeFilter,
@@ -173,6 +175,28 @@ async def create_group_sensors_gui(
     power_sensor_ids = await resolve_entity_ids_recursively(hass, entry, SensorDeviceClass.POWER)
 
     energy_sensor_ids = await resolve_entity_ids_recursively(hass, entry, SensorDeviceClass.ENERGY)
+
+    if sensor_config.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
+        from .history import HistoryImportError
+        from .history_sources import resolve_history_sources
+
+        issue_id = f"group_history_setup_{entry.entry_id}"
+        try:
+            energy_sensor_ids = await resolve_history_sources(hass, entry)
+            sensors = create_group_sensors_custom(hass, group_name, sensor_config, power_sensor_ids, energy_sensor_ids)
+        except HistoryImportError as error:
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key="group_history_failed",
+                translation_placeholders={"entity": group_name, "error": str(error)},
+            )
+            raise SensorConfigurationError(str(error)) from error
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
+        return sensors
 
     return create_group_sensors_custom(hass, group_name, sensor_config, power_sensor_ids, energy_sensor_ids)
 
@@ -416,6 +440,30 @@ def create_grouped_energy_sensor(
     )
 
     _LOGGER.debug("Creating grouped energy sensor: %s (entity_id=%s)", name, entity_id)
+
+    if sensor_config.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
+        from .history import HistoryImportError
+        from .history_sensor import HistoryGroupedEnergySensor
+
+        if (
+            group_type != GroupType.CUSTOM
+            or sensor_config.get(CONF_FORCE_CALCULATE_GROUP_ENERGY)
+            or sensor_config.get(CONF_GROUP_ENERGY_START_AT_ZERO, True)
+            or not energy_sensor_ids
+            or entity_id in energy_sensor_ids
+        ):
+            raise HistoryImportError(
+                "History requires a custom energy group without start-at-zero or force-calculation"
+            )
+        return HistoryGroupedEnergySensor(
+            hass=hass,
+            name=name,
+            entities=energy_sensor_ids,
+            unique_id=energy_unique_id,
+            sensor_config=sensor_config,
+            group_type=group_type,
+            entity_id=entity_id,
+        )
 
     should_create_riemann = bool(sensor_config.get(CONF_FORCE_CALCULATE_GROUP_ENERGY, False))
     if not should_create_riemann and not energy_sensor_ids:
@@ -774,7 +822,7 @@ class GroupedEnergySensor(GroupedSensor, RestoreSensor, EnergySensor):
     """Grouped energy sensor. Sums all values of underlying individual energy sensors."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.TOTAL
+    _attr_state_class: SensorStateClass | None = SensorStateClass.TOTAL
     _is_energy_sensor = True
 
     def __init__(

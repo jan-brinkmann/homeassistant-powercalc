@@ -16,6 +16,19 @@ When this is not working.
 
 Select `Group` -> `Custom` and follow the instructions.
 
+### Import existing energy history once
+
+When creating a custom group, you can enable **Import energy long-term statistics from sources once**.
+This option is disabled by default. Disable **Start at zero** when enabling it: the new group starts
+with its imported consumption total instead.
+
+The original source statistics remain unchanged. The import combines hourly consumption statistics,
+then continues the group with live readings. It does not reconstruct power, raw-state, cost or
+utility-meter history. Reloading, restarting or changing members after completion does not repeat it.
+
+See [Importing group energy history](energy-history.md) for supported sources, missing data,
+progress and recovery.
+
 !!! tip
 
     After you have created a group you can directly assign a virtual power sensor to it when creating the power sensor by selecting the group in the `Group` field.

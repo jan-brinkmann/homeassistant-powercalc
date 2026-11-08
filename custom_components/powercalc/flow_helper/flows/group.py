@@ -20,11 +20,13 @@ from homeassistant.helpers.selector import TextSelector
 
 from custom_components.powercalc.const import (
     CONF_AREA,
+    CONF_CREATE_ENERGY_SENSOR,
     CONF_EXCLUDE_ENTITIES,
     CONF_FLOOR,
     CONF_FORCE_CALCULATE_GROUP_ENERGY,
     CONF_GROUP,
     CONF_GROUP_ENERGY_ENTITIES,
+    CONF_GROUP_ENERGY_IMPORT_HISTORY,
     CONF_GROUP_ENERGY_START_AT_ZERO,
     CONF_GROUP_MEMBER_DEVICES,
     CONF_GROUP_MEMBER_SENSORS,
@@ -193,6 +195,12 @@ def validate_group_input(user_input: dict[str, Any] | None = None) -> None:
     if not any(key in (user_input or {}) for key in required_keys):
         raise SchemaFlowError("group_mandatory")
 
+    if user_input and user_input.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
+        if user_input.get(CONF_FORCE_CALCULATE_GROUP_ENERGY) or not user_input.get(CONF_CREATE_ENERGY_SENSOR, True):
+            raise SchemaFlowError("group_history_requires_energy")
+        if user_input.get(CONF_GROUP_ENERGY_START_AT_ZERO, True):
+            raise SchemaFlowError("group_history_start_at_zero")
+
 
 def create_schema_group_custom(
     hass: HomeAssistant,
@@ -263,6 +271,7 @@ def create_schema_group_custom(
         options_schema = options_schema.extend(
             {
                 vol.Optional(CONF_GROUP_ENERGY_START_AT_ZERO, default=True): selector.BooleanSelector(),
+                vol.Optional(CONF_GROUP_ENERGY_IMPORT_HISTORY, default=False): selector.BooleanSelector(),
                 **SCHEMA_ENERGY_SENSOR_TOGGLE.schema,
                 **SCHEMA_UTILITY_METER_TOGGLE.schema,
             },
@@ -416,6 +425,8 @@ class GroupConfigFlow(GroupFlow):
             ui = flatten_sections(ui, resolved_schema)
             if group_type == GroupType.CUSTOM:
                 validate_group_input(ui)
+                if not ui.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
+                    ui.pop(CONF_GROUP_ENERGY_IMPORT_HISTORY, None)
 
             self.flow.name = ui.get(CONF_NAME)
             self.flow.sensor_config.update(ui)
@@ -505,10 +516,19 @@ class GroupOptionsFlow(GroupFlow):
 
     async def async_step_group_custom(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the group options flow."""
+
+        def validate_history_options(ui: dict[str, Any]) -> dict[str, str] | None:
+            if self.flow.sensor_config.get(CONF_GROUP_ENERGY_IMPORT_HISTORY) and ui.get(
+                CONF_FORCE_CALCULATE_GROUP_ENERGY
+            ):
+                return {"base": "group_history_requires_energy"}
+            return None
+
         return await self.flow.async_handle_options_step(
             user_input,
             create_schema_group_custom(self.flow.hass, self.flow.config_entry, True),
             Step.GROUP_CUSTOM,
+            validate=validate_history_options,
         )
 
     async def async_step_group_domain(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
