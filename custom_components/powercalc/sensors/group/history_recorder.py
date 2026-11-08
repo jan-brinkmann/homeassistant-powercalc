@@ -94,23 +94,36 @@ class HistoryRecorder:
         self.recorder.queue_task(SynchronizeTask(future))
         await future
 
-    async def verify_live_reference(self, boundary: datetime, total: float) -> None:
+    async def verify_live_reference(self, boundary: datetime, total: float, state_offset: float = 0.0) -> None:
         await self.synchronize()
         rows = await self.execute(get_last_short_term_statistics, self.hass, 1, self.target, False, {"state", "sum"})
         latest = rows.get(self.target, [])
-        expected: StatisticsRow = {"start": (boundary - timedelta(minutes=5)).timestamp(), "state": total, "sum": total}
+        expected: StatisticsRow = {
+            "start": (boundary - timedelta(minutes=5)).timestamp(),
+            "state": total + state_offset,
+            "sum": total,
+        }
         if len(latest) != 1 or latest[0]["start"] != expected["start"] or not rows_match(latest[0], expected):
             raise HistoryImportError(f"The recorder transition reference changed for {self.target}")
 
-    async def import_batch(self, rows: list[StatisticsRow], period: Period, *, first_batch: bool = False) -> None:
+    async def import_batch(
+        self,
+        rows: list[StatisticsRow],
+        period: Period,
+        *,
+        first_batch: bool = False,
+        previous_rows: list[StatisticsRow] | None = None,
+    ) -> None:
         """Replay a journalled batch only if existing rows agree, then verify the commit."""
         if not rows:
             return
         future: asyncio.Future[None] = self.hass.loop.create_future()
-        self.recorder.queue_task(ImportGroupStatisticsTask(self, rows, period, future, first_batch))
+        self.recorder.queue_task(ImportGroupStatisticsTask(self, rows, period, future, first_batch, previous_rows))
         await future
 
-    def import_in_recorder(self, rows: list[StatisticsRow], period: Period, first_batch: bool) -> None:
+    def import_in_recorder(
+        self, rows: list[StatisticsRow], period: Period, first_batch: bool, previous_rows: list[StatisticsRow] | None
+    ) -> None:
         """Validate and import on the recorder thread, serialized with other writers."""
         self.validate_target_metadata()
         if first_batch:
@@ -132,9 +145,7 @@ class HistoryRecorder:
         )
         existing = read_batch().get(self.target, [])
         expected = {row["start"]: row for row in rows}
-        for row in existing:
-            if row["start"] not in expected or not rows_match(row, expected[row["start"]]):
-                raise HistoryImportError(f"Conflicting statistics for {self.target} at {row['start']}")
+        validate_existing_rows(self.target, existing, expected, previous_rows)
         statistics: list[StatisticData] = []
         for row in rows:
             statistic = StatisticData(start=datetime.fromtimestamp(row["start"], UTC))
@@ -193,10 +204,11 @@ class ImportGroupStatisticsTask(RecorderTask):
     period: Period
     future: asyncio.Future[None]
     first_batch: bool
+    previous_rows: list[StatisticsRow] | None
 
     def run(self, instance: Recorder) -> None:
         try:
-            self.importer.import_in_recorder(self.rows, self.period, self.first_batch)
+            self.importer.import_in_recorder(self.rows, self.period, self.first_batch, self.previous_rows)
         except Exception as error:  # noqa: BLE001
             # Propagate worker failures to the awaiting import, including unexpected
             # API failures. Never leave a pending future or crash the recorder thread.
@@ -213,6 +225,26 @@ class ImportGroupStatisticsTask(RecorderTask):
             self.future.set_exception(error)
         else:
             self.future.set_result(None)
+
+
+def validate_existing_rows(
+    target: str,
+    existing: list[StatisticsRow],
+    expected: dict[float, StatisticsRow],
+    previous_rows: list[StatisticsRow] | None,
+) -> None:
+    """Permit only exact retries or a journalled state-only correction of owned rows."""
+    previous = {row["start"]: row for row in previous_rows or []}
+    if previous_rows is not None:
+        if previous.keys() != expected.keys() or len(existing) != len(expected):
+            raise HistoryImportError(f"Statistics to align changed or disappeared for {target}")
+        if any(previous[start].get("sum") != row.get("sum") for start, row in expected.items()):
+            raise HistoryImportError(f"Counter alignment must preserve consumption sums for {target}")
+    for row in existing:
+        wanted = expected.get(row["start"])
+        old = previous.get(row["start"])
+        if wanted is None or (not rows_match(row, wanted) and not (old and rows_match(row, old))):
+            raise HistoryImportError(f"Conflicting statistics for {target} at {row['start']}")
 
 
 def rows_match(first: StatisticsRow, second: StatisticsRow) -> bool:

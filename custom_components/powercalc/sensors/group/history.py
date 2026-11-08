@@ -29,6 +29,8 @@ def aggregate_statistics(
     rows: dict[str, list[StatisticsRow]],
     checkpoint: AggregationState,
     interval: timedelta = timedelta(hours=1),
+    source_weights: dict[str, int] | None = None,
+    state_offset: float = 0.0,
 ) -> list[StatisticData]:
     """Accumulate only adjacent sum differences, preserving signed corrections.
 
@@ -36,6 +38,7 @@ def aggregate_statistics(
     its multi-interval difference is deliberately excluded, never interpolated.
     """
     sources = sorted(set(sources))
+    weights = source_weights or {}
     seconds = interval.total_seconds()
     by_start = index_statistics(sources, rows, seconds)
 
@@ -60,7 +63,7 @@ def aggregate_statistics(
                 and (previous_value := previous.get("sum")) is not None
                 and value is not None
             ):
-                checkpoint.total += value - previous_value
+                checkpoint.total += (value - previous_value) * weights.get(source, 1)
                 known += 1
             checkpoint.previous[source] = sample
 
@@ -71,7 +74,9 @@ def aggregate_statistics(
         if known or initial_reference:
             result.append(
                 StatisticData(
-                    start=datetime.fromtimestamp(timestamp, UTC), state=checkpoint.total, sum=checkpoint.total
+                    start=datetime.fromtimestamp(timestamp, UTC),
+                    state=checkpoint.total + state_offset,
+                    sum=checkpoint.total,
                 )
             )
         # Omit unknown hours rather than writing NULL sums: HA's change query uses

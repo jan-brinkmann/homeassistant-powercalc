@@ -2,6 +2,7 @@ from decimal import Decimal
 import logging
 from typing import cast
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ENTITY_ID, CONF_NAME, CONF_UNIQUE_ID, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import Entity
@@ -9,6 +10,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from custom_components.powercalc.const import (
     CONF_CREATE_ENERGY_SENSORS,
+    CONF_GROUP_ENERGY_IMPORT_HISTORY,
     CONF_SUBTRACT_ENTITIES,
     CONF_UTILITY_METER_NET_CONSUMPTION,
     GroupType,
@@ -17,7 +19,7 @@ from custom_components.powercalc.errors import SensorConfigurationError
 from custom_components.powercalc.sensors.abstract import generate_power_sensor_entity_id, generate_power_sensor_name
 from custom_components.powercalc.sensors.energy import create_energy_sensor
 from custom_components.powercalc.sensors.energy_related import create_energy_related_sensors
-from custom_components.powercalc.sensors.group.custom import GroupedPowerSensor
+from custom_components.powercalc.sensors.group.custom import GroupedPowerSensor, create_grouped_energy_sensor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,10 +27,15 @@ _LOGGER = logging.getLogger(__name__)
 def create_subtract_group_sensors(
     hass: HomeAssistant,
     config: ConfigType,
+    config_entry: ConfigEntry | None = None,
 ) -> list[Entity]:
     """Create subtract group sensors."""
 
+    if config.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
+        config[CONF_SUBTRACT_ENTITIES] = list(dict.fromkeys(config.get(CONF_SUBTRACT_ENTITIES) or []))
     validate_config(config)
+    if config.get(CONF_GROUP_ENERGY_IMPORT_HISTORY) and not config.get(CONF_CREATE_ENERGY_SENSORS):
+        raise SensorConfigurationError("History import requires the group energy sensor to be enabled")
     group_name = str(config.get(CONF_NAME))
     base_entity_id = str(config.get(CONF_ENTITY_ID))
     subtract_entities = cast(list[str], config.get(CONF_SUBTRACT_ENTITIES))
@@ -56,11 +63,12 @@ def create_subtract_group_sensors(
     )
     sensors.append(power_sensor)
     if config.get(CONF_CREATE_ENERGY_SENSORS):
-        energy_sensor = create_energy_sensor(
-            hass,
-            config,
-            power_sensor,
-        )
+        if config.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
+            energy_sensor = create_grouped_energy_sensor(
+                hass, group_name, GroupType.SUBTRACT, config, set(), power_sensor, history_entry=config_entry
+            )
+        else:
+            energy_sensor = create_energy_sensor(hass, config, power_sensor)
         sensors.append(energy_sensor)
 
         config[CONF_UTILITY_METER_NET_CONSUMPTION] = True

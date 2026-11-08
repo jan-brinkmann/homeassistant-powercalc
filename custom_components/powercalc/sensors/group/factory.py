@@ -35,6 +35,7 @@ async def create_group_sensors(
             set(),
             set(),
             force_create=True,
+            history_entry=config_entry,
         )
     if group_type == GroupType.STANDBY:
         return standby_group.create_general_standby_sensors(hass, sensor_config)
@@ -56,6 +57,7 @@ async def create_group_sensors(
         return subtract_group.create_subtract_group_sensors(
             hass=hass,
             config=sensor_config,
+            config_entry=config_entry,
         )
 
     if group_type == GroupType.TRACKED_UNTRACKED and config_entry:

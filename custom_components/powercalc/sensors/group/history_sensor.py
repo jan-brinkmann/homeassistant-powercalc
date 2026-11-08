@@ -4,10 +4,12 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 import logging
-from typing import cast
+from typing import Any, cast
 
 from homeassistant.components.recorder import history
+from homeassistant.components.recorder.statistics import StatisticsRow
 from homeassistant.components.sensor import SensorStateClass
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_RECORDER_5MIN_STATISTICS_GENERATED
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, State, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -16,7 +18,7 @@ from homeassistant.helpers.event import EventStateChangedData, async_track_state
 from homeassistant.util import dt as dt_util
 from sqlalchemy.exc import SQLAlchemyError
 
-from custom_components.powercalc.const import DOMAIN
+from custom_components.powercalc.const import ATTR_ENTITIES, DOMAIN, GroupType
 
 from .custom import GroupedEnergySensor, GroupedSensor
 from .history import HistoryImportError
@@ -29,9 +31,26 @@ _LOGGER = logging.getLogger(__name__)
 class HistoryGroupedEnergySensor(GroupedEnergySensor):
     """Publish no energy value until recorder and the live checkpoint agree."""
 
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        name: str,
+        entities: set[str],
+        entity_id: str,
+        sensor_config: dict[str, Any],
+        group_type: GroupType,
+        unique_id: str | None = None,
+        config_entry: ConfigEntry | None = None,
+        source_weights: dict[str, int] | None = None,
+    ) -> None:
+        super().__init__(hass, name, entities, entity_id, sensor_config, group_type, unique_id)
+        self._history_entry = config_entry
+        self._source_weights = dict(source_weights) if source_weights is not None else dict.fromkeys(entities, 1)
+
     async def async_added_to_hass(self) -> None:
         # Unknown preserves diagnostic attributes; unavailable would hide progress.
         self._attr_native_value = None
+        self._attr_extra_state_attributes = {}
         self._attr_state_class = None
         self._history_ready = False
         self._history_task: asyncio.Task[None] | None = None
@@ -68,8 +87,21 @@ class HistoryGroupedEnergySensor(GroupedEnergySensor):
     def _on_statistics(self, _: Event) -> None:
         self._statistics_ready.set()
 
+    async def _resolve_sources(self) -> None:
+        if self._group_type not in [GroupType.DOMAIN, GroupType.SUBTRACT]:
+            return
+        from .history_sources import resolve_history_source_weights
+
+        self._source_weights = await resolve_history_source_weights(self.hass, self._sensor_config, self._history_entry)
+        if self.entity_id in self._source_weights:
+            raise HistoryImportError("The history group cannot use its own energy sensor as a source")
+        self._entities = set(self._source_weights)
+        if self._attr_extra_state_attributes and ATTR_ENTITIES in self._attr_extra_state_attributes:
+            self._attr_extra_state_attributes[ATTR_ENTITIES] = self._entities
+
     async def _start_history(self) -> None:
         try:
+            await self._resolve_sources()
             self._import = GroupHistoryImport(
                 self.hass,
                 str(self.unique_id),
@@ -79,21 +111,26 @@ class HistoryGroupedEnergySensor(GroupedEnergySensor):
             )
             if not await self._import.recorder.recorder.async_db_ready:
                 raise HistoryImportError("Recorder database is unavailable")
-            await self._import.load(sorted(self._entities))
+            await self._import.load(sorted(self._entities), self._source_weights)
             if self._import.journal.phase == ImportPhase.LIVE and not self._import.journal.live_started:
                 # A crash can follow a persisted capture before the first group
                 # state is published. Rebuild the bridge to the current interval;
                 # treating it as running live would shift usage into a later one.
                 self._import.journal.phase = ImportPhase.SHORT_TERM
             if self._import.journal.phase != ImportPhase.LIVE:
-                if set(self._import.journal.sources) != self._entities:
+                frozen_weights = {
+                    source: self._import.journal.source_weights.get(source, 1)
+                    for source in self._import.journal.sources
+                }
+                if frozen_weights != self._source_weights:
                     raise HistoryImportError(
-                        "Group members changed during an unfinished import; restore the original members"
+                        "Group members changed during an unfinished import; restore the original members and signs"
                     )
                 self._update_progress()
                 await self._import.import_hourly()
                 await self._prepare_transition()
             else:
+                await self._import.align_hourly_states()
                 await self._restore_live()
             self._attr_state_class = SensorStateClass.TOTAL
             self._publish_total()
@@ -129,7 +166,7 @@ class HistoryGroupedEnergySensor(GroupedEnergySensor):
             # Its event is emitted before commit, so follow it with a queue barrier.
             await self._import.recorder.synchronize()
             try:
-                await self._import.read_references(self._import.journal.sources, boundary)
+                references = await self._import.read_references(self._import.journal.sources, boundary)
             except HistoryImportError:
                 try:
                     async with asyncio.timeout_at(deadline):
@@ -137,8 +174,14 @@ class HistoryGroupedEnergySensor(GroupedEnergySensor):
                 except TimeoutError as error:
                     raise HistoryImportError("Timed out waiting for complete short-term source statistics") from error
                 continue
+            native_offset = self._import.journal.native_offset
+            if native_offset is None:
+                native_offset = await self._initialize_native_offset(references, boundary)
+            await self._import.align_hourly_states()
             await self._import.import_short_term(boundary)
-            await self._import.recorder.verify_live_reference(boundary, self._import.journal.aggregation.total)
+            await self._import.recorder.verify_live_reference(
+                boundary, self._import.journal.aggregation.total, native_offset
+            )
             if dt_util.utcnow() >= boundary + timedelta(minutes=5):
                 continue
             await self._capture_live(boundary)
@@ -158,10 +201,36 @@ class HistoryGroupedEnergySensor(GroupedEnergySensor):
 
     async def _capture_live(self, boundary: datetime) -> None:
         journal = self._import.journal
-        journal.live_total = journal.aggregation.total
+        captured = await self._capture_members(journal.aggregation.previous, boundary, journal.aggregation.total)
+        journal.live_since = captured.timestamp()
+        journal.transition = boundary.timestamp()
+        journal.phase = ImportPhase.LIVE
+        await self._import.save()
+
+    async def _initialize_native_offset(self, references: dict[str, StatisticsRow], boundary: datetime) -> float:
+        """Match the initial live counter to its sources without changing consumption."""
+        journal = self._import.journal
+        # The bridge is validated in full before publication. Its cumulative sum
+        # difference lets us anchor the native counter before writing target rows.
+        total = journal.aggregation.total
+        for source, reference in references.items():
+            reference_sum = cast(float, reference["sum"])
+            previous_sum = cast(float, journal.aggregation.previous[source]["sum"])
+            total += (reference_sum - previous_sum) * self._source_weights[source]
+        await self._capture_members(references, boundary, total)
+        native_total = sum(member["value"] * member["weight"] for member in journal.members.values())
+        journal.native_offset = native_total - journal.live_total
+        await self._import.save()
+        return journal.native_offset
+
+    async def _capture_members(
+        self, references: dict[str, StatisticsRow], boundary: datetime, total: float
+    ) -> datetime:
+        journal = self._import.journal
+        journal.live_total = total
         journal.members = {}
         self._buffer.clear()
-        for source, reference in journal.aggregation.previous.items():
+        for source, reference in references.items():
             state = self.hass.states.get(source)
             if state is None or state.attributes.get("state_class") not in [
                 SensorStateClass.TOTAL,
@@ -174,6 +243,7 @@ class HistoryGroupedEnergySensor(GroupedEnergySensor):
                 "state_class": state.attributes["state_class"],
                 "last_reset": datetime.fromtimestamp(last_reset, UTC).isoformat() if last_reset is not None else None,
                 "updated": boundary.timestamp() - 0.000001,
+                "weight": self._source_weights[source],
             }
         self._listen_to_members()
         captured_states = [state for source in self._entities if (state := self.hass.states.get(source)) is not None]
@@ -183,11 +253,8 @@ class HistoryGroupedEnergySensor(GroupedEnergySensor):
         # awaiting I/O, including a reading exactly at that timestamp. Newer
         # readings must be applied in buffer order, especially across resets.
         for state in captured_states:
-            apply_source_state(journal, state)
-        journal.live_since = captured.timestamp()
-        journal.transition = boundary.timestamp()
-        journal.phase = ImportPhase.LIVE
-        await self._import.save()
+            apply_source_state(journal, state, self._source_weights[state.entity_id])
+        return captured
 
     async def _restore_live(self) -> None:
         journal = self._import.journal
@@ -199,7 +266,7 @@ class HistoryGroupedEnergySensor(GroupedEnergySensor):
         # Members added after completion establish a fresh baseline. They never
         # contribute historical usage, and never restart the historical import.
         for state in captured_states:
-            apply_source_state(journal, state)
+            apply_source_state(journal, state, self._source_weights[state.entity_id])
         journal.live_since = captured.timestamp()
         await self._import.save()
 
@@ -227,7 +294,7 @@ class HistoryGroupedEnergySensor(GroupedEnergySensor):
                 if not states.get(source):
                     raise HistoryImportError(f"Recorder state history is missing for the live transition of {source}")
                 for state in states[source]:
-                    apply_source_state(journal, state)
+                    apply_source_state(journal, state, journal.members[source].get("weight", 1))
             cursor = batch_end
 
     @callback
@@ -249,7 +316,7 @@ class HistoryGroupedEnergySensor(GroupedEnergySensor):
             while self._buffer:
                 pending, self._buffer = self._buffer, []
                 for state in pending:
-                    apply_source_state(self._import.journal, state)
+                    apply_source_state(self._import.journal, state, self._source_weights[state.entity_id])
                 self._import.journal.live_since = max(state.last_updated.timestamp() for state in pending)
                 await self._import.save()
                 self._publish_total()
@@ -261,7 +328,8 @@ class HistoryGroupedEnergySensor(GroupedEnergySensor):
         # Keep the native counter at the precision of the imported sum. Rounding
         # here would introduce a fabricated difference at the recorder handoff;
         # suggested_display_precision still controls the usual UI presentation.
-        self._native_value_exact = Decimal(str(self._import.journal.live_total))
+        journal = self._import.journal
+        self._native_value_exact = Decimal(str(journal.live_total)) + Decimal(str(journal.native_offset))
         self._attr_native_value = self._native_value_exact
         self._update_progress()
 

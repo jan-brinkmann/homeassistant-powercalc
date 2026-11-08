@@ -18,6 +18,20 @@ When this is not working.
 
 Select `Group` -> `Subtract` and follow the instructions.
 
+### Import existing energy history
+
+Enable **Import energy long-term statistics from sources once** when creating the group to import
+the base energy consumption minus the selected partial consumptions. The live energy sensor then
+continues from the same cumulative energy sources with the same signs.
+
+Existing Powercalc power/energy associations are used automatically. Otherwise select the matching
+**Base energy counter** and one **Energy counter to subtract** for each selected power source.
+Power history cannot supply missing energy history. Negative net consumption and signed corrections
+are preserved; overlapping subtracted groups are rejected.
+
+See [Importing group energy history](energy-history.md) for the complete requirements and recovery
+behavior. Changing the sources later affects future consumption and never starts another history import.
+
 ## Create group with YAML
 
 ```yaml

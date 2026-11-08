@@ -176,7 +176,7 @@ async def test_import_live_transition_and_reload(
         group = hass.states.get("sensor.history_energy")
         assert group.attributes["history_import_status"] == "completed"
         expected_first = 0.5 if unavailable else (0.8 if during_import else 0.700001)
-        assert float(group.state) == pytest.approx(expected_first)
+        assert float(group.state) == pytest.approx(300 + expected_first)
 
         freezer.move_to(boundary + timedelta(minutes=5))
         do_adhoc_statistics(hass, start=boundary)
@@ -185,7 +185,7 @@ async def test_import_live_transition_and_reload(
         hass.states.async_set("sensor.source", "300.9", attributes)
         await hass.async_block_till_done()
         await async_wait_recording_done(hass)
-        assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(0.9)
+        assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(300.9)
         done.clear()
         # A reload reconstructs a new entity and loads the persisted total together
         # with its source references. It must never run another historical import.
@@ -193,7 +193,7 @@ async def test_import_live_transition_and_reload(
             assert await hass.config_entries.async_reload(entry.entry_id)
             await hass.async_block_till_done(wait_background_tasks=True)
             assert done.is_set()
-        assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(0.9)
+        assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(300.9)
         freezer.move_to(boundary + timedelta(minutes=10))
         do_adhoc_statistics(hass, start=boundary + timedelta(minutes=5))
         await async_wait_recording_done(hass)
@@ -226,11 +226,11 @@ async def test_import_live_transition_and_reload(
                 entry, data={**entry.data, CONF_GROUP_ENERGY_ENTITIES: ["sensor.replacement"]}
             )
             await hass.async_block_till_done(wait_background_tasks=True)
-        assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(1.9)
+        assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(301.9)
         freezer.move_to(boundary + timedelta(minutes=62))
         hass.states.async_set("sensor.replacement", "1000.2", attributes)
         await hass.async_block_till_done()
-        assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(2.1)
+        assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(302.1)
 
 
 async def test_import_batches_are_idempotent_and_detect_conflicts(hass: HomeAssistant, recorder_mock: Recorder) -> None:
@@ -307,6 +307,7 @@ async def test_incomplete_short_term_bridge_is_rejected(
         boundary.timestamp(),
         cursor=boundary.timestamp(),
         phase=ImportPhase.SHORT_TERM,
+        native_offset=0.0,
     )
     with pytest.raises(HistoryImportError, match="incomplete"):
         await job.import_short_term(boundary + timedelta(minutes=5))
@@ -420,6 +421,7 @@ async def test_resume_bridge_after_short_term_commit(hass: HomeAssistant, record
         boundary.timestamp(),
         cursor=boundary.timestamp(),
         phase=ImportPhase.SHORT_TERM,
+        native_offset=0.0,
         imported_rows=1,
         aggregation=AggregationState(
             previous={"sensor.source": {"start": boundary.timestamp() - 300, "state": 300, "sum": 100}}
@@ -485,7 +487,7 @@ async def test_completed_import_survives_home_assistant_restart(
                 },
             )
             await hass.async_block_till_done(wait_background_tasks=True)
-            assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(0.7)
+            assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(300.7)
             freezer.move_to(boundary + timedelta(minutes=5))
             do_adhoc_statistics(hass, start=boundary)
             await async_wait_recording_done(hass)
@@ -517,7 +519,7 @@ async def test_completed_import_survives_home_assistant_restart(
                     ):
                         assert await restarted.config_entries.async_setup(restored_entry.entry_id)
                         await restarted.async_block_till_done(wait_background_tasks=True)
-                    assert float(restarted.states.get("sensor.history_energy").state) == pytest.approx(0.9)
+                    assert float(restarted.states.get("sensor.history_energy").state) == pytest.approx(300.9)
                     for minute, value in [(10, 300.9), (15, 301.1)]:
                         freezer.move_to(boundary + timedelta(minutes=minute - 4))
                         restarted.states.async_set("sensor.source", str(value), attributes)

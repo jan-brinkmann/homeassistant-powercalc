@@ -15,7 +15,7 @@ from .history import HistoryImportError
 from .history_import import ImportJournal
 
 
-def apply_source_state(journal: ImportJournal, state: State) -> None:
+def apply_source_state(journal: ImportJournal, state: State, weight: int = 1) -> None:
     """Apply one observation once; a new member establishes its own zero point."""
     if state.state in UNAVAILABLE_STATES:
         return
@@ -23,10 +23,10 @@ def apply_source_state(journal: ImportJournal, state: State) -> None:
     state_class = state.attributes["state_class"]
     previous = journal.members.get(state.entity_id)
     timestamp = state.last_updated.timestamp()
-    if previous is not None and timestamp <= previous["updated"]:
+    if previous is not None and timestamp <= previous["updated"] and previous.get("weight", 1) == weight:
         return
     reset = normalize_last_reset(state.attributes.get("last_reset"))
-    if previous is not None:
+    if previous is not None and previous.get("weight", 1) == weight:
         if previous["state_class"] != state_class:
             raise HistoryImportError(f"State class changed for {state.entity_id}")
         delta = value - previous["value"]
@@ -35,12 +35,13 @@ def apply_source_state(journal: ImportJournal, state: State) -> None:
                 delta = value
         elif reset is not None and reset != previous["last_reset"]:
             delta = value
-        journal.live_total += delta
+        journal.live_total += delta * weight
     member: dict[str, Any] = {
         "value": value,
         "state_class": state_class,
         "last_reset": reset,
         "updated": timestamp,
+        "weight": weight,
     }
     journal.members[state.entity_id] = member
 

@@ -185,8 +185,8 @@ def test_explicit_reset_and_changed_state_class() -> None:
     "config,error",
     [
         ({CONF_SUB_GROUPS: ["missing"]}, "Subgroup not found"),
-        ({CONF_GROUP_TYPE: GroupType.DOMAIN}, "custom group"),
-        ({CONF_FORCE_CALCULATE_GROUP_ENERGY: True}, "custom group"),
+        ({CONF_GROUP_TYPE: GroupType.STANDBY}, "supported group"),
+        ({CONF_FORCE_CALCULATE_GROUP_ENERGY: True}, "supported group"),
         ({CONF_GROUP_MEMBER_SENSORS: ["missing"]}, "no existing energy"),
         ({}, "No cumulative"),
         ({CONF_GROUP_ENERGY_ENTITIES: ["sensor.yaml_group"]}, "Cannot resolve"),

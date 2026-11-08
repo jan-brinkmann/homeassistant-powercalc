@@ -20,7 +20,8 @@ Select `Group` -> `Custom` and follow the instructions.
 
 When creating a custom group, you can enable **Import energy long-term statistics from sources once**.
 This option is disabled by default. Disable **Start at zero** when enabling it: the new group starts
-with its imported consumption total instead.
+with the current sum of its source counters, just like a group without history and with the same
+start setting. Historical consumption is imported separately and does not change that initial reading.
 
 The original source statistics remain unchanged. The import combines hourly consumption statistics,
 then continues the group with live readings. It does not reconstruct power, raw-state, cost or

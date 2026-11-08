@@ -84,6 +84,8 @@ async def pending_group(hass: HomeAssistant, recorder_mock: Recorder, freezer: F
         boundary.timestamp(),
         cursor=boundary.timestamp(),
         phase=ImportPhase.SHORT_TERM,
+        native_offset=0.0,
+        short_term_seeded=True,
         imported_rows=1,
         aggregation=AggregationState(
             total=0.5,

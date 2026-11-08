@@ -178,12 +178,15 @@ async def create_group_sensors_gui(
 
     if sensor_config.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
         from .history import HistoryImportError
-        from .history_sources import resolve_history_sources
+        from .history_sources import resolve_history_source_weights
 
         issue_id = f"group_history_setup_{entry.entry_id}"
         try:
-            energy_sensor_ids = await resolve_history_sources(hass, entry)
-            sensors = create_group_sensors_custom(hass, group_name, sensor_config, power_sensor_ids, energy_sensor_ids)
+            weights = await resolve_history_source_weights(hass, sensor_config, entry)
+            energy_sensor_ids = set(weights)
+            sensors = create_group_sensors_custom(
+                hass, group_name, sensor_config, power_sensor_ids, energy_sensor_ids, history_weights=weights
+            )
         except HistoryImportError as error:
             ir.async_create_issue(
                 hass,
@@ -208,6 +211,8 @@ def create_group_sensors_custom(
     power_sensor_ids: set[str],
     energy_sensor_ids: set[str],
     force_create: bool = False,
+    history_entry: ConfigEntry | None = None,
+    history_weights: dict[str, int] | None = None,
 ) -> list[Entity]:
     """Create grouped power and energy sensors."""
 
@@ -237,6 +242,8 @@ def create_group_sensors_custom(
             sensor_config,
             energy_sensor_ids,
             power_sensor,
+            history_entry=history_entry,
+            history_weights=history_weights,
         )
 
         group_sensors.append(energy_sensor)
@@ -426,6 +433,9 @@ def create_grouped_energy_sensor(
     sensor_config: ConfigType,
     energy_sensor_ids: set[str],
     power_sensor: GroupedPowerSensor | None,
+    *,
+    history_entry: ConfigEntry | None = None,
+    history_weights: dict[str, int] | None = None,
 ) -> EnergySensor:
     name = generate_energy_sensor_name(sensor_config, group_name)
     unique_id = sensor_config.get(CONF_UNIQUE_ID)
@@ -446,14 +456,14 @@ def create_grouped_energy_sensor(
         from .history_sensor import HistoryGroupedEnergySensor
 
         if (
-            group_type != GroupType.CUSTOM
+            group_type not in [GroupType.CUSTOM, GroupType.DOMAIN, GroupType.SUBTRACT]
             or sensor_config.get(CONF_FORCE_CALCULATE_GROUP_ENERGY)
             or sensor_config.get(CONF_GROUP_ENERGY_START_AT_ZERO, True)
-            or not energy_sensor_ids
+            or (not energy_sensor_ids and group_type == GroupType.CUSTOM)
             or entity_id in energy_sensor_ids
         ):
             raise HistoryImportError(
-                "History requires a custom energy group without start-at-zero or force-calculation"
+                "History requires a supported energy group without start-at-zero or force-calculation"
             )
         return HistoryGroupedEnergySensor(
             hass=hass,
@@ -463,6 +473,8 @@ def create_grouped_energy_sensor(
             sensor_config=sensor_config,
             group_type=group_type,
             entity_id=entity_id,
+            config_entry=history_entry,
+            source_weights=history_weights,
         )
 
     should_create_riemann = bool(sensor_config.get(CONF_FORCE_CALCULATE_GROUP_ENERGY, False))

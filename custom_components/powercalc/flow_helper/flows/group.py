@@ -25,9 +25,11 @@ from custom_components.powercalc.const import (
     CONF_FLOOR,
     CONF_FORCE_CALCULATE_GROUP_ENERGY,
     CONF_GROUP,
+    CONF_GROUP_ENERGY_BASE_ENTITY,
     CONF_GROUP_ENERGY_ENTITIES,
     CONF_GROUP_ENERGY_IMPORT_HISTORY,
     CONF_GROUP_ENERGY_START_AT_ZERO,
+    CONF_GROUP_ENERGY_SUBTRACT_ENTITIES,
     CONF_GROUP_MEMBER_DEVICES,
     CONF_GROUP_MEMBER_SENSORS,
     CONF_GROUP_POWER_ENTITIES,
@@ -68,6 +70,16 @@ SECTION_GROUP_MEMBERS = "members"
 SECTION_GROUP_OPTIONS = "options"
 
 # Schemas
+SCHEMA_GROUP_HISTORY_IMPORT = vol.Schema(
+    {vol.Optional(CONF_GROUP_ENERGY_IMPORT_HISTORY, default=False): selector.BooleanSelector()}
+)
+SCHEMA_GROUP_HISTORY = vol.Schema(
+    {
+        vol.Optional(CONF_GROUP_ENERGY_START_AT_ZERO, default=True): selector.BooleanSelector(),
+        vol.Optional(CONF_GROUP_ENERGY_IMPORT_HISTORY, default=False): selector.BooleanSelector(),
+    }
+)
+
 SCHEMA_GROUP = vol.Schema(
     {
         vol.Required(CONF_NAME): str,
@@ -97,6 +109,7 @@ SCHEMA_GROUP_DOMAIN = vol.Schema(
     {
         vol.Required(CONF_NAME): str,
         **SCHEMA_GROUP_DOMAIN_OPTIONS.schema,
+        **SCHEMA_GROUP_HISTORY_IMPORT.schema,
         **SCHEMA_ENERGY_SENSOR_TOGGLE.schema,
         **SCHEMA_UTILITY_METER_TOGGLE.schema,
     },
@@ -121,10 +134,23 @@ SCHEMA_GROUP_SUBTRACT_OPTIONS = vol.Schema(
     },
 )
 
+SCHEMA_GROUP_SUBTRACT_HISTORY = vol.Schema(
+    {
+        vol.Optional(CONF_GROUP_ENERGY_BASE_ENTITY): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=Platform.SENSOR, device_class=SensorDeviceClass.ENERGY)
+        ),
+        vol.Optional(CONF_GROUP_ENERGY_SUBTRACT_ENTITIES): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=Platform.SENSOR, device_class=SensorDeviceClass.ENERGY, multiple=True)
+        ),
+    }
+)
+
 SCHEMA_GROUP_SUBTRACT = vol.Schema(
     {
         vol.Required(CONF_NAME): selector.TextSelector(),
         **SCHEMA_GROUP_SUBTRACT_OPTIONS.schema,
+        **SCHEMA_GROUP_HISTORY_IMPORT.schema,
+        **SCHEMA_GROUP_SUBTRACT_HISTORY.schema,
         **SCHEMA_ENERGY_SENSOR_TOGGLE.schema,
         **SCHEMA_UTILITY_METER_TOGGLE.schema,
     },
@@ -195,11 +221,36 @@ def validate_group_input(user_input: dict[str, Any] | None = None) -> None:
     if not any(key in (user_input or {}) for key in required_keys):
         raise SchemaFlowError("group_mandatory")
 
+    validate_history_input(user_input)
+
+
+def validate_history_input(user_input: dict[str, Any] | None) -> None:
     if user_input and user_input.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
         if user_input.get(CONF_FORCE_CALCULATE_GROUP_ENERGY) or not user_input.get(CONF_CREATE_ENERGY_SENSOR, True):
             raise SchemaFlowError("group_history_requires_energy")
         if user_input.get(CONF_GROUP_ENERGY_START_AT_ZERO, True):
             raise SchemaFlowError("group_history_start_at_zero")
+
+
+def validate_subtract_history_input(hass: HomeAssistant, user_input: dict[str, Any]) -> None:
+    if not user_input.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
+        return
+    from custom_components.powercalc.sensors.group.history import HistoryImportError
+    from custom_components.powercalc.sensors.group.history_sources import find_energy_counter
+
+    try:
+        if not user_input.get(CONF_GROUP_ENERGY_BASE_ENTITY):
+            find_energy_counter(hass, user_input[CONF_ENTITY_ID])
+        subtract_power = set(user_input.get(CONF_SUBTRACT_ENTITIES) or [])
+        subtract_energy = user_input.get(CONF_GROUP_ENERGY_SUBTRACT_ENTITIES)
+        if subtract_energy:
+            if len(set(subtract_energy)) != len(subtract_power):
+                raise SchemaFlowError("group_history_energy_sources")
+        else:
+            for source in subtract_power:
+                find_energy_counter(hass, source)
+    except HistoryImportError as error:
+        raise SchemaFlowError("group_history_energy_sources") from error
 
 
 def create_schema_group_custom(
@@ -270,8 +321,7 @@ def create_schema_group_custom(
     if not is_option_flow:
         options_schema = options_schema.extend(
             {
-                vol.Optional(CONF_GROUP_ENERGY_START_AT_ZERO, default=True): selector.BooleanSelector(),
-                vol.Optional(CONF_GROUP_ENERGY_IMPORT_HISTORY, default=False): selector.BooleanSelector(),
+                **SCHEMA_GROUP_HISTORY.schema,
                 **SCHEMA_ENERGY_SENSOR_TOGGLE.schema,
                 **SCHEMA_UTILITY_METER_TOGGLE.schema,
             },
@@ -425,8 +475,23 @@ class GroupConfigFlow(GroupFlow):
             ui = flatten_sections(ui, resolved_schema)
             if group_type == GroupType.CUSTOM:
                 validate_group_input(ui)
-                if not ui.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
-                    ui.pop(CONF_GROUP_ENERGY_IMPORT_HISTORY, None)
+            else:
+                if ui.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
+                    ui.setdefault(CONF_GROUP_ENERGY_START_AT_ZERO, False)
+                validate_history_input(ui)
+            if group_type == GroupType.SUBTRACT:
+                if ui.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
+                    ui[CONF_SUBTRACT_ENTITIES] = list(dict.fromkeys(ui.get(CONF_SUBTRACT_ENTITIES) or []))
+                validate_subtract_history_input(self.flow.hass, ui)
+            if not ui.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
+                ui.pop(CONF_GROUP_ENERGY_IMPORT_HISTORY, None)
+                if group_type != GroupType.CUSTOM:
+                    for key in [
+                        CONF_GROUP_ENERGY_START_AT_ZERO,
+                        CONF_GROUP_ENERGY_BASE_ENTITY,
+                        CONF_GROUP_ENERGY_SUBTRACT_ENTITIES,
+                    ]:
+                        ui.pop(key, None)
 
             self.flow.name = ui.get(CONF_NAME)
             self.flow.sensor_config.update(ui)
@@ -537,7 +602,20 @@ class GroupOptionsFlow(GroupFlow):
 
     async def async_step_group_subtract(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the group options flow."""
-        return await self.flow.async_handle_options_step(user_input, SCHEMA_GROUP_SUBTRACT_OPTIONS, Step.GROUP_SUBTRACT)
+        schema = SCHEMA_GROUP_SUBTRACT_OPTIONS
+        if self.flow.sensor_config.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
+            schema = schema.extend(SCHEMA_GROUP_SUBTRACT_HISTORY.schema)
+
+        def validate_sources(ui: dict[str, Any]) -> dict[str, str] | None:
+            try:
+                validate_subtract_history_input(self.flow.hass, {**self.flow.sensor_config, **ui})
+            except SchemaFlowError as error:
+                return {"base": str(error)}
+            return None
+
+        return await self.flow.async_handle_options_step(
+            user_input, schema, Step.GROUP_SUBTRACT, validate=validate_sources
+        )
 
     async def async_step_group_tracked_untracked(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the group options flow."""

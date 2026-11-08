@@ -202,7 +202,9 @@ async def test_completed_legacy_journal_does_not_reimport(hass: HomeAssistant, p
     await setup_pending_group(hass, pending_group)
     stored = await pending_group.job.store.async_load()
     assert stored is not None
-    legacy = {key: value for key, value in stored.items() if key != "live_started"}
+    legacy = {
+        key: value for key, value in stored.items() if key not in ["live_started", "native_offset", "short_term_seeded"]
+    }
     await pending_group.job.store.async_save(legacy)
     with patch.object(HistoryRecorder, "import_batch", side_effect=AssertionError("Unexpected reimport")):
         assert await hass.config_entries.async_reload(pending_group.entry.entry_id)

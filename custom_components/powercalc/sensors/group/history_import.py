@@ -36,6 +36,7 @@ class ImportJournal:
     phase: ImportPhase = ImportPhase.HOURLY
     aggregation: AggregationState = field(default_factory=AggregationState)
     pending: list[StatisticsRow] = field(default_factory=list)
+    pending_previous: list[StatisticsRow] = field(default_factory=list)
     pending_hourly: list[StatisticsRow] = field(default_factory=list)
     pending_period: Period = "hour"
     imported_rows: int = 0
@@ -43,6 +44,11 @@ class ImportJournal:
     live_since: float = 0
     transition: float | None = None
     live_started: bool = False
+    native_offset: float | None = None
+    short_term_seeded: bool = False
+    state_alignment_cursor: float = 0
+    state_alignment_complete: bool = False
+    source_weights: dict[str, int] = field(default_factory=dict)
     members: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
@@ -53,6 +59,10 @@ class ImportJournal:
         # Journals from the first implementation did not distinguish capture from
         # publication. Preserve completed imports when loading that older format.
         values.setdefault("live_started", data["phase"] == ImportPhase.LIVE)
+        # Preserve the counter origin and already imported references of older
+        # journals. Rebasing a running counter would create artificial usage.
+        values.setdefault("native_offset", 0.0)
+        values.setdefault("short_term_seeded", data["phase"] != ImportPhase.HOURLY)
         return cls(**values)
 
 
@@ -79,7 +89,7 @@ class GroupHistoryImport:
         if verified != payload:
             raise HistoryImportError("The group history checkpoint could not be saved; recorder import was stopped")
 
-    async def load(self, sources: list[str]) -> None:
+    async def load(self, sources: list[str], source_weights: dict[str, int] | None = None) -> None:
         stored = await self.store.async_load()
         if stored is not None:
             try:
@@ -112,6 +122,7 @@ class GroupHistoryImport:
             unit=self.recorder.unit,
             sources=sources,
             boundary=boundary.timestamp(),
+            source_weights=dict(source_weights or {}),
         )
         await self.save()
 
@@ -130,11 +141,17 @@ class GroupHistoryImport:
     async def flush_pending(self) -> None:
         journal = self.journal
         if journal.pending:
-            await self.recorder.import_batch(
-                journal.pending, journal.pending_period, first_batch=journal.imported_rows == 0
-            )
-            journal.imported_rows += len(journal.pending)
+            if journal.pending_previous:
+                await self.recorder.import_batch(
+                    journal.pending, journal.pending_period, previous_rows=journal.pending_previous
+                )
+            else:
+                await self.recorder.import_batch(
+                    journal.pending, journal.pending_period, first_batch=journal.imported_rows == 0
+                )
+                journal.imported_rows += len(journal.pending)
             journal.pending = []
+            journal.pending_previous = []
             await self.save()
             if self.progress:
                 self.progress()
@@ -144,8 +161,11 @@ class GroupHistoryImport:
             journal.pending_hourly = []
             await self.save()
 
-    async def stage_batch(self, rows: list[StatisticsRow], period: Period) -> None:
+    async def stage_batch(
+        self, rows: list[StatisticsRow], period: Period, previous_rows: list[StatisticsRow] | None = None
+    ) -> None:
         self.journal.pending = rows
+        self.journal.pending_previous = previous_rows or []
         self.journal.pending_period = period
         # Persist the exact payload BEFORE enqueueing. A retry checks existing rows
         # against this payload instead of re-reading potentially corrected sources.
@@ -161,9 +181,11 @@ class GroupHistoryImport:
             end = min(start + BATCH_DURATION, boundary)
             source_rows = await self.recorder.read(journal.sources, start, end)
             aggregated = await self.hass.async_add_executor_job(
-                aggregate_statistics, journal.sources, source_rows, journal.aggregation
+                aggregate_statistics, journal.sources, source_rows, journal.aggregation, HOUR, journal.source_weights
             )
             journal.cursor = end.timestamp()
+            if not journal.imported_rows and aggregated:
+                journal.state_alignment_cursor = aggregated[0]["start"].timestamp()
             await self.stage_batch(
                 [
                     {"start": row["start"].timestamp(), "state": row.get("state"), "sum": row.get("sum")}
@@ -181,16 +203,50 @@ class GroupHistoryImport:
         journal.aggregation.last_start = journal.boundary - 300
         journal.phase = ImportPhase.SHORT_TERM
         journal.cursor = journal.boundary
-        await self.stage_batch(
-            [{"start": journal.boundary - 300, "sum": journal.aggregation.total, "state": journal.aggregation.total}],
-            "5minute",
-        )
+        await self.save()
+
+    async def align_hourly_states(self) -> None:
+        """Apply the live counter origin to owned history without changing consumption."""
+        journal = self.journal
+        await self.flush_pending()
+        if journal.state_alignment_complete:
+            return
+        if journal.native_offset is None:
+            raise HistoryImportError("The initial group counter reference has not been established")
+        if journal.native_offset == 0:
+            journal.state_alignment_cursor = journal.boundary
+        boundary = datetime.fromtimestamp(journal.boundary, UTC)
+        while journal.state_alignment_cursor < journal.boundary:
+            start = datetime.fromtimestamp(journal.state_alignment_cursor, UTC)
+            end = min(start + BATCH_DURATION, boundary)
+            existing = (await self.recorder.read([journal.target], start, end)).get(journal.target, [])
+            updated = align_counter_states(existing, journal.native_offset)
+            journal.state_alignment_cursor = end.timestamp()
+            # Freeze both sides before permitting any replacement. On recovery,
+            # recorder accepts the exact old values or the exact committed values.
+            await self.stage_batch(updated, "hour", existing if updated else None)
+        journal.state_alignment_complete = True
+        await self.save()
 
     async def import_short_term(self, boundary: datetime) -> None:
         journal = self.journal
         await self.flush_pending()
         if journal.phase != ImportPhase.SHORT_TERM:
             return
+        if journal.native_offset is None:
+            raise HistoryImportError("The initial group counter reference has not been established")
+        if not journal.short_term_seeded:
+            journal.short_term_seeded = True
+            await self.stage_batch(
+                [
+                    {
+                        "start": journal.boundary - 300,
+                        "sum": journal.aggregation.total,
+                        "state": journal.aggregation.total + journal.native_offset,
+                    }
+                ],
+                "5minute",
+            )
         while journal.cursor < boundary.timestamp():
             start = datetime.fromtimestamp(journal.cursor, UTC)
             end = min(start.replace(minute=0, second=0, microsecond=0) + HOUR, boundary)
@@ -208,7 +264,13 @@ class GroupHistoryImport:
                         f"Short-term statistics are incomplete during the live transition: {source}"
                     )
             aggregated = await self.hass.async_add_executor_job(
-                aggregate_statistics, journal.sources, source_rows, journal.aggregation, FIVE_MINUTES
+                aggregate_statistics,
+                journal.sources,
+                source_rows,
+                journal.aggregation,
+                FIVE_MINUTES,
+                journal.source_weights,
+                journal.native_offset,
             )
             journal.cursor = end.timestamp()
             # Journal both tables together: a crash after the short-term commit
@@ -218,7 +280,7 @@ class GroupHistoryImport:
                     {
                         "start": (end - HOUR).timestamp(),
                         "sum": journal.aggregation.total,
-                        "state": journal.aggregation.total,
+                        "state": journal.aggregation.total + journal.native_offset,
                     }
                 ]
             await self.stage_batch(
@@ -228,6 +290,23 @@ class GroupHistoryImport:
                 ],
                 "5minute",
             )
+
+
+def align_counter_states(rows: list[StatisticsRow], offset: float) -> list[StatisticsRow]:
+    updated: list[StatisticsRow] = []
+    changed = False
+    for row in rows:
+        state = row.get("state")
+        total = row.get("sum")
+        if state is None or total is None or not isfinite(state) or not isfinite(total):
+            raise HistoryImportError("Cannot align incomplete group counter statistics")
+        expected = total + offset
+        if not isclose(state, expected, rel_tol=0, abs_tol=1e-9):
+            if not isclose(state, total, rel_tol=0, abs_tol=1e-9):
+                raise HistoryImportError(f"Conflicting group counter state at {row['start']}; nothing was overwritten")
+            changed = True
+        updated.append({"start": row["start"], "state": expected, "sum": total})
+    return updated if changed else []
 
 
 def is_complete_reference(row: StatisticsRow, timestamp: float) -> bool:
