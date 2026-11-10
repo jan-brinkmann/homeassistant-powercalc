@@ -25,3 +25,13 @@ This group is used to get a sum of all tracked or untracked power sensors.
 - [Standby group](standby.md)
 
 This group is created by default and sums all power when devices are in standby mode.
+
+## Inherit energy history
+
+When creating a custom, domain, or subtract group, disable **Start at zero** to inherit the current energy total and the available hourly long-term statistics of its members. In YAML, use `group_energy_start_at_zero: false` on the group configuration. The default is `true`.
+
+Custom and domain groups sum the member energy histories. Subtract groups take the base entity's energy history and subtract the other members' histories. For groups that calculate energy from power, Powercalc needs a uniquely associated energy sensor for each power sensor. It uses Powercalc's configured associations, integral sensor sources, or an unambiguous energy sensor on the same device. If an association cannot be resolved, the import is skipped and a warning is logged.
+
+The import converts energy units and preserves cumulative consumption across historical meter resets. Missing samples carry the member's last known values forward; a member contributes zero before its first available sample. Only available statistics can be inherited, so sensors without recorded history cannot supply historical consumption.
+
+History is imported once when the energy sensor is first created. Reloading, restarting, or changing group members does not import history again. Existing group statistics are preserved. After initialization, the group's existing energy calculation continues as usual.

@@ -18,6 +18,7 @@ from custom_components.powercalc.sensors.abstract import generate_power_sensor_e
 from custom_components.powercalc.sensors.energy import create_energy_sensor
 from custom_components.powercalc.sensors.energy_related import create_energy_related_sensors
 from custom_components.powercalc.sensors.group.custom import GroupedPowerSensor
+from custom_components.powercalc.sensors.group.energy_statistics import GroupEnergyStatistics
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,6 +61,9 @@ def create_subtract_group_sensors(
             hass,
             config,
             power_sensor,
+            group_statistics=GroupEnergyStatistics(
+                hass, config, power_sensor=power_sensor, base_power_entity=base_entity_id
+            ),
         )
         sensors.append(energy_sensor)
 

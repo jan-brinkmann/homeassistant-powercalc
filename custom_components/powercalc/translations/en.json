@@ -84,9 +84,13 @@
           "create_cost_sensor": "Create cost sensor",
           "create_utility_meters": "Create utility meters",
           "domain": "Entity domain",
-          "exclude_entities": "Exclude entities"
+          "exclude_entities": "Exclude entities",
+          "group_energy_start_at_zero": "Start at zero"
         },
-        "title": "Create a domain based group sensor"
+        "title": "Create a domain based group sensor",
+        "data_description": {
+          "group_energy_start_at_zero": "When enabled, the new energy sensor starts at zero. When disabled, it inherits the current energy total and available long-term statistics of its members. This only applies when the sensor is first created."
+        }
       },
       "fixed": {
         "data": {
@@ -280,7 +284,7 @@
               "device": "Add the group entities powercalc creates to an existing device",
               "include_non_powercalc_sensors": "Control whether to include non powercalc sensors when using the area option",
               "force_calculate_group_energy": "By default powercalc sums the energy sensors from the member sensors. Toggle this option to force creating a Riemann Sum sensor",
-              "group_energy_start_at_zero": "When enabled, the energy sensor will start at zero when the sensor is created. Otherwise it will sum all the current member energy sensor states",
+              "group_energy_start_at_zero": "When enabled, the new energy sensor starts at zero. When disabled, it inherits the current energy total and available long-term statistics of its members. This only applies when the sensor is first created.",
               "create_energy_sensor": "Whether powercalc needs to create a kWh sensor"
             }
           }
@@ -294,11 +298,13 @@
           "create_utility_meters": "Create utility meters",
           "entity_id": "Base entity",
           "name": "Name",
-          "subtract_entities": "Subtract entities"
+          "subtract_entities": "Subtract entities",
+          "group_energy_start_at_zero": "Start at zero"
         },
         "data_description": {
           "entity_id": "The base entity to subtract the power from",
-          "subtract_entities": "Select all the entities you want to subtract from the base entity"
+          "subtract_entities": "Select all the entities you want to subtract from the base entity",
+          "group_energy_start_at_zero": "When enabled, the new energy sensor starts at zero. When disabled, it inherits the current energy total and long-term statistics of the base entity minus those of the entities to subtract. Each power sensor must have a uniquely associated energy sensor. This only applies when the sensor is first created."
         },
         "title": "Subtract group sensor"
       },

@@ -115,6 +115,7 @@ from custom_components.powercalc.sensors.abstract import (
 )
 from custom_components.powercalc.sensors.energy import EnergySensor, VirtualEnergySensor, VirtualStandbyEnergySensor
 from custom_components.powercalc.sensors.energy_related import create_energy_related_sensors
+from custom_components.powercalc.sensors.group.energy_statistics import GroupEnergyStatistics
 from custom_components.powercalc.sensors.power import PowerSensor
 from custom_components.powercalc.unit import (
     ENERGY_UNIT_PREFIX_MAPPING,
@@ -432,6 +433,7 @@ def create_grouped_energy_sensor(
             sensor_config=sensor_config,
             entity_category=sensor_config.get(CONF_ENERGY_SENSOR_CATEGORY),
             unit_prefix=sensor_config.get(CONF_ENERGY_SENSOR_UNIT_PREFIX, UnitPrefix.NONE),
+            group_statistics=GroupEnergyStatistics(hass, sensor_config, energy_sensor_ids, power_sensor),
         )
 
     return GroupedEnergySensor(
@@ -802,13 +804,13 @@ class GroupedEnergySensor(GroupedSensor, RestoreSensor, EnergySensor):
             UnitOfEnergy.WATT_HOUR,
         )
         self._prev_state_store: PreviousStateStore = PreviousStateStore(hass)
+        self._group_statistics = GroupEnergyStatistics(hass, sensor_config, entities)
+        self._group_statistics.set_target(entity_id)
 
     async def async_added_to_hass(self) -> None:
         """Register state listeners."""
 
         self._prev_state_store = await PreviousStateStore.async_get_instance(self.hass)
-        # Clean up any entities that are no longer part of the group
-        self._prev_state_store.cleanup_entity_states(self.entity_id, self._entities)
 
         await self.restore_last_state()
 
@@ -833,6 +835,14 @@ class GroupedEnergySensor(GroupedSensor, RestoreSensor, EnergySensor):
                     entity_id,
                     State(entity_id, "0.00"),
                 )
+
+    async def on_start(self, _: HomeAssistant) -> None:
+        await super().on_start(_)
+        # Domain membership must be resolved before removing previous member states.
+        self._prev_state_store.cleanup_entity_states(self.entity_id, self._entities)
+        # Domain group membership is populated during startup.
+        self._group_statistics.set_members(self._entities)
+        await self._group_statistics.async_initialize(self)
 
     async def async_calibrate(self, value: str) -> None:
         _LOGGER.debug("%s: Calibrate group energy sensor to: %s", self.entity_id, value)

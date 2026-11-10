@@ -84,9 +84,13 @@
           "create_cost_sensor": "Kostensensor erstellen",
           "create_utility_meters": "Verbrauchszähler erstellen",
           "domain": "Entitäten-Domäne",
-          "exclude_entities": "Ausgeschlossene Entitäten"
+          "exclude_entities": "Ausgeschlossene Entitäten",
+          "group_energy_start_at_zero": "Start at zero"
         },
-        "title": "Einen Domain-basierten Gruppensensor erstellen"
+        "title": "Einen Domain-basierten Gruppensensor erstellen",
+        "data_description": {
+          "group_energy_start_at_zero": "When enabled, the new energy sensor starts at zero. When disabled, it inherits the current energy total and available long-term statistics of its members. This only applies when the sensor is first created."
+        }
       },
       "fixed": {
         "data": {
@@ -280,7 +284,7 @@
               "device": "Füge die von Powercalc erstellten Gruppenentitäten einem bestehenden Gerät hinzu",
               "include_non_powercalc_sensors": "Lege fest, ob nicht-powercalc-Sensoren bei Verwendung der Bereichs-Option mit einbezogen werden sollen",
               "force_calculate_group_energy": "Standardmäßig summiert Powercalc die Energiesensoren der Mitgliedssensoren. Schalten Sie diese Option um, um die Erstellung eines Riemann Summen Sensors zu erzwingen",
-              "group_energy_start_at_zero": "Wenn aktiviert, wird der Energiesensor bei Null gestartet, wenn der Sensor erstellt wird. Andernfalls wird er den Status aller aktuellen Energiesensoren Mitglieder summieren",
+              "group_energy_start_at_zero": "When enabled, the new energy sensor starts at zero. When disabled, it inherits the current energy total and available long-term statistics of its members. This only applies when the sensor is first created.",
               "create_energy_sensor": "Ob powercalc einen kWh Sensor erstellen muss"
             }
           }
@@ -294,11 +298,13 @@
           "create_utility_meters": "Verbrauchszähler erstellen",
           "entity_id": "Basis-Entität",
           "name": "Name",
-          "subtract_entities": "Abzuziehende Entitäten"
+          "subtract_entities": "Abzuziehende Entitäten",
+          "group_energy_start_at_zero": "Start at zero"
         },
         "data_description": {
           "entity_id": "Die Basis-Entität, von der die Leistung abgezogen wird",
-          "subtract_entities": "Wählen Sie alle Entitäten aus, die Sie von der Basiseinheit abziehen möchten"
+          "subtract_entities": "Wählen Sie alle Entitäten aus, die Sie von der Basiseinheit abziehen möchten",
+          "group_energy_start_at_zero": "When enabled, the new energy sensor starts at zero. When disabled, it inherits the current energy total and long-term statistics of the base entity minus those of the entities to subtract. Each power sensor must have a uniquely associated energy sensor. This only applies when the sensor is first created."
         },
         "title": "Gruppensensor zum Subtrahieren"
       },

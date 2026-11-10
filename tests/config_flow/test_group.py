@@ -658,6 +658,7 @@ async def test_domain_group_flow(hass: HomeAssistant) -> None:
     assert result["data"] == {
         CONF_SENSOR_TYPE: SensorType.GROUP,
         CONF_GROUP_TYPE: GroupType.DOMAIN,
+        CONF_GROUP_ENERGY_START_AT_ZERO: True,
         CONF_NAME: "My group sensor",
         CONF_DOMAIN: Platform.LIGHT,
         CONF_CREATE_ENERGY_SENSOR: True,

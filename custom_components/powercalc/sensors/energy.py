@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import inspect
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.integration.sensor import IntegrationSensor, IntegrationSensorExtraStoredData
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN, SensorDeviceClass, SensorStateClass
@@ -16,6 +16,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, State, callback
 import homeassistant.helpers.entity_registry as er
+from homeassistant.helpers.start import async_at_start
 from homeassistant.helpers.typing import ConfigType
 
 from custom_components.powercalc.common import SourceEntity
@@ -52,6 +53,9 @@ from .abstract import (
 )
 from .power import PowerSensor, RealPowerSensor, VirtualPowerSensor
 
+if TYPE_CHECKING:
+    from .group.energy_statistics import GroupEnergyStatistics
+
 ENERGY_ICON = "mdi:lightning-bolt"
 ENTITY_ID_FORMAT = SENSOR_DOMAIN + ".{}"
 
@@ -73,6 +77,7 @@ def create_energy_sensor(
     sensor_config: ConfigType,
     power_sensor: PowerSensor,
     source_entity: SourceEntity | None = None,
+    group_statistics: GroupEnergyStatistics | None = None,
 ) -> EnergySensor:
     """Create the energy sensor entity."""
 
@@ -87,7 +92,7 @@ def create_energy_sensor(
         return energy_sensor
 
     # Create a new virtual energy sensor based on the virtual power sensor
-    return _create_virtual_energy_sensor(hass, sensor_config, power_sensor, source_entity)
+    return _create_virtual_energy_sensor(hass, sensor_config, power_sensor, source_entity, group_statistics)
 
 
 def create_standby_energy_sensor(
@@ -190,6 +195,7 @@ def _create_virtual_energy_sensor(
     sensor_config: ConfigType,
     power_sensor: PowerSensor,
     source_entity: SourceEntity | None,
+    group_statistics: GroupEnergyStatistics | None = None,
 ) -> VirtualEnergySensor:
     """Create a virtual energy sensor using riemann integral integration."""
     name = generate_energy_sensor_name(
@@ -225,6 +231,7 @@ def _create_virtual_energy_sensor(
         powercalc_source_entity=source_entity.entity_id if source_entity else None,
         powercalc_source_domain=source_entity.domain if source_entity else None,
         sensor_config=sensor_config,
+        group_statistics=group_statistics,
     )
 
 
@@ -317,6 +324,7 @@ class VirtualEnergySensor(IntegrationSensor, EnergySensor):
         entity_category: EntityCategory | None = None,
         name: str | None = None,
         unit_prefix: str | None = None,
+        group_statistics: GroupEnergyStatistics | None = None,
     ) -> None:
         round_digits: int = int(sensor_config.get(CONF_ENERGY_SENSOR_PRECISION, DEFAULT_ENERGY_SENSOR_PRECISION))
         integration_method: str = sensor_config.get(CONF_ENERGY_INTEGRATION_METHOD, DEFAULT_ENERGY_INTEGRATION_METHOD)
@@ -359,6 +367,18 @@ class VirtualEnergySensor(IntegrationSensor, EnergySensor):
         )
         self._last_accepted_value: float | None = None
         self._last_rejected_value: float | None = None
+        self._group_statistics = group_statistics
+        if group_statistics:
+            group_statistics.set_target(entity_id)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self._group_statistics:
+            self.async_on_remove(async_at_start(self.hass, self._async_initialize_group_statistics))
+
+    async def _async_initialize_group_statistics(self, _: HomeAssistant) -> None:
+        if self._group_statistics:
+            await self._group_statistics.async_initialize(self, self.async_calibrate)
 
     def _integrate_on_state_change(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Override to add outlier filtering.

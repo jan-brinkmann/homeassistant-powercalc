@@ -97,6 +97,7 @@ SCHEMA_GROUP_DOMAIN = vol.Schema(
         **SCHEMA_GROUP_DOMAIN_OPTIONS.schema,
         **SCHEMA_ENERGY_SENSOR_TOGGLE.schema,
         **SCHEMA_UTILITY_METER_TOGGLE.schema,
+        vol.Optional(CONF_GROUP_ENERGY_START_AT_ZERO, default=True): selector.BooleanSelector(),
     },
 )
 
@@ -125,6 +126,7 @@ SCHEMA_GROUP_SUBTRACT = vol.Schema(
         **SCHEMA_GROUP_SUBTRACT_OPTIONS.schema,
         **SCHEMA_ENERGY_SENSOR_TOGGLE.schema,
         **SCHEMA_UTILITY_METER_TOGGLE.schema,
+        vol.Optional(CONF_GROUP_ENERGY_START_AT_ZERO, default=True): selector.BooleanSelector(),
     },
 )
 
