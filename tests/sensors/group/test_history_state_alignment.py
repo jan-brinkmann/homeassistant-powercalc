@@ -144,7 +144,8 @@ async def test_completed_import_from_previous_version_is_aligned_once(
     legacy = {
         key: value
         for key, value in stored.items()
-        if key not in ["pending_previous", "state_alignment_cursor", "state_alignment_complete"]
+        if key
+        not in ["pending_previous", "state_alignment_cursor", "state_alignment_complete", "runtime_handoff_complete"]
     }
     await job.store.async_save(legacy)
     source_rows = await job.recorder.read(["sensor.a", "sensor.b"], boundary - timedelta(hours=5), boundary)
@@ -255,3 +256,24 @@ async def test_recorder_alignment_protects_consumption_and_conflicting_rows(
     assert len(rows[recorder.target]) == 1
     assert rows[recorder.target][0]["state"] == 1.0
     assert rows[recorder.target][0]["sum"] == 1.0
+
+
+async def test_legacy_handoff_can_establish_a_new_member_baseline(
+    hass: HomeAssistant, flat_history_group: FlatHistoryGroup
+) -> None:
+    entry = flat_history_group.entry
+    job = GroupHistoryImport(hass, f"{entry.unique_id}_energy", "sensor.history_energy", "kWh")
+    stored = await job.store.async_load()
+    stored.pop("runtime_handoff_complete")
+    await job.store.async_save(stored)
+    hass.states.async_set(
+        "sensor.replacement", "1000", {"device_class": "energy", "state_class": "total", "unit_of_measurement": "kWh"}
+    )
+    with patch.object(GroupHistoryImport, "import_hourly", side_effect=AssertionError("Unexpected source reimport")):
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_GROUP_ENERGY_ENTITIES: ["sensor.replacement"]}
+        )
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(4.1203)
+    await job.load([])
+    assert job.journal.runtime_handoff_complete

@@ -46,7 +46,7 @@ async def test_create_history_group(hass: HomeAssistant, group_type: GroupType, 
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_GROUP_TYPE] == group_type
     assert result["data"][CONF_GROUP_ENERGY_IMPORT_HISTORY]
-    assert result["data"][CONF_GROUP_ENERGY_START_AT_ZERO] is False
+    assert CONF_GROUP_ENERGY_START_AT_ZERO not in result["data"]
 
 
 @pytest.mark.parametrize("step", [Step.GROUP_DOMAIN, Step.GROUP_SUBTRACT])
@@ -132,19 +132,15 @@ async def test_subtract_history_options_keep_the_import_one_time(hass: HomeAssis
     entry = result["result"]
     options = await initialize_options_flow(hass, entry, Step.GROUP_SUBTRACT)
     assert CONF_GROUP_ENERGY_IMPORT_HISTORY not in options["data_schema"].schema
-    options = await submit_options_step(hass, options, {CONF_GROUP_ENERGY_SUBTRACT_ENTITIES: ["sensor.a", "sensor.b"]})
-    assert options["errors"] == {"base": "group_history_energy_sources"}
+    assert CONF_GROUP_ENERGY_BASE_ENTITY not in options["data_schema"].schema
+    assert CONF_GROUP_ENERGY_SUBTRACT_ENTITIES not in options["data_schema"].schema
     options = await submit_options_step(
-        hass,
-        options,
-        {
-            CONF_GROUP_ENERGY_BASE_ENTITY: "sensor.part_energy",
-            CONF_GROUP_ENERGY_SUBTRACT_ENTITIES: ["sensor.base_energy"],
-        },
+        hass, options, {CONF_ENTITY_ID: "sensor.replacement_power", CONF_SUBTRACT_ENTITIES: []}
     )
     assert options["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert entry.data[CONF_GROUP_ENERGY_IMPORT_HISTORY]
-    assert entry.data[CONF_GROUP_ENERGY_BASE_ENTITY] == "sensor.part_energy"
+    assert entry.data[CONF_ENTITY_ID] == "sensor.replacement_power"
+    assert entry.data[CONF_GROUP_ENERGY_BASE_ENTITY] == "sensor.base_energy"
 
 
 async def test_subtract_without_history_keeps_existing_configuration(hass: HomeAssistant) -> None:

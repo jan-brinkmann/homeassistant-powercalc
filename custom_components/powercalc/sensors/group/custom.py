@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from decimal import Decimal
 import logging
@@ -35,7 +35,7 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import entity_registry as er, issue_registry as ir, start
+from homeassistant.helpers import entity_registry as er, start
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import (
     EventStateChangedData,
@@ -97,7 +97,6 @@ from custom_components.powercalc.const import (
     SensorType,
     UnitPrefix,
 )
-from custom_components.powercalc.errors import SensorConfigurationError
 from custom_components.powercalc.group_include.filter import (
     AreaFilter,
     CompositeFilter,
@@ -117,6 +116,7 @@ from custom_components.powercalc.sensors.abstract import (
 )
 from custom_components.powercalc.sensors.energy import EnergySensor, VirtualEnergySensor, VirtualStandbyEnergySensor
 from custom_components.powercalc.sensors.energy_related import create_energy_related_sensors
+from custom_components.powercalc.sensors.group.history_seed import GroupHistorySeed
 from custom_components.powercalc.sensors.power import PowerSensor
 from custom_components.powercalc.unit import (
     ENERGY_UNIT_PREFIX_MAPPING,
@@ -176,32 +176,9 @@ async def create_group_sensors_gui(
 
     energy_sensor_ids = await resolve_entity_ids_recursively(hass, entry, SensorDeviceClass.ENERGY)
 
-    if sensor_config.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
-        from .history import HistoryImportError
-        from .history_sources import resolve_history_source_weights
-
-        issue_id = f"group_history_setup_{entry.entry_id}"
-        try:
-            weights = await resolve_history_source_weights(hass, sensor_config, entry)
-            energy_sensor_ids = set(weights)
-            sensors = create_group_sensors_custom(
-                hass, group_name, sensor_config, power_sensor_ids, energy_sensor_ids, history_weights=weights
-            )
-        except HistoryImportError as error:
-            ir.async_create_issue(
-                hass,
-                DOMAIN,
-                issue_id,
-                is_fixable=False,
-                severity=ir.IssueSeverity.ERROR,
-                translation_key="group_history_failed",
-                translation_placeholders={"entity": group_name, "error": str(error)},
-            )
-            raise SensorConfigurationError(str(error)) from error
-        ir.async_delete_issue(hass, DOMAIN, issue_id)
-        return sensors
-
-    return create_group_sensors_custom(hass, group_name, sensor_config, power_sensor_ids, energy_sensor_ids)
+    return create_group_sensors_custom(
+        hass, group_name, sensor_config, power_sensor_ids, energy_sensor_ids, history_entry=entry
+    )
 
 
 def create_group_sensors_custom(
@@ -212,7 +189,6 @@ def create_group_sensors_custom(
     energy_sensor_ids: set[str],
     force_create: bool = False,
     history_entry: ConfigEntry | None = None,
-    history_weights: dict[str, int] | None = None,
 ) -> list[Entity]:
     """Create grouped power and energy sensors."""
 
@@ -243,7 +219,6 @@ def create_group_sensors_custom(
             energy_sensor_ids,
             power_sensor,
             history_entry=history_entry,
-            history_weights=history_weights,
         )
 
         group_sensors.append(energy_sensor)
@@ -435,7 +410,6 @@ def create_grouped_energy_sensor(
     power_sensor: GroupedPowerSensor | None,
     *,
     history_entry: ConfigEntry | None = None,
-    history_weights: dict[str, int] | None = None,
 ) -> EnergySensor:
     name = generate_energy_sensor_name(sensor_config, group_name)
     unique_id = sensor_config.get(CONF_UNIQUE_ID)
@@ -451,39 +425,13 @@ def create_grouped_energy_sensor(
 
     _LOGGER.debug("Creating grouped energy sensor: %s (entity_id=%s)", name, entity_id)
 
-    if sensor_config.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
-        from .history import HistoryImportError
-        from .history_sensor import HistoryGroupedEnergySensor
-
-        if (
-            group_type not in [GroupType.CUSTOM, GroupType.DOMAIN, GroupType.SUBTRACT]
-            or sensor_config.get(CONF_FORCE_CALCULATE_GROUP_ENERGY)
-            or sensor_config.get(CONF_GROUP_ENERGY_START_AT_ZERO, True)
-            or (not energy_sensor_ids and group_type == GroupType.CUSTOM)
-            or entity_id in energy_sensor_ids
-        ):
-            raise HistoryImportError(
-                "History requires a supported energy group without start-at-zero or force-calculation"
-            )
-        return HistoryGroupedEnergySensor(
-            hass=hass,
-            name=name,
-            entities=energy_sensor_ids,
-            unique_id=energy_unique_id,
-            sensor_config=sensor_config,
-            group_type=group_type,
-            entity_id=entity_id,
-            config_entry=history_entry,
-            source_weights=history_weights,
-        )
-
     should_create_riemann = bool(sensor_config.get(CONF_FORCE_CALCULATE_GROUP_ENERGY, False))
     if not should_create_riemann and not energy_sensor_ids:
         should_create_riemann = True
     if group_type == GroupType.DOMAIN and sensor_config.get(CONF_DOMAIN) == "all":
         should_create_riemann = False
     if power_sensor and should_create_riemann:
-        return VirtualEnergySensor(
+        sensor: GroupedEnergySensor | VirtualEnergySensor = VirtualEnergySensor(
             hass=hass,
             source_entity=power_sensor.entity_id,
             entity_id=entity_id,
@@ -493,16 +441,31 @@ def create_grouped_energy_sensor(
             entity_category=sensor_config.get(CONF_ENERGY_SENSOR_CATEGORY),
             unit_prefix=sensor_config.get(CONF_ENERGY_SENSOR_UNIT_PREFIX, UnitPrefix.NONE),
         )
+    else:
+        sensor = GroupedEnergySensor(
+            hass=hass,
+            name=name,
+            entities=energy_sensor_ids,
+            unique_id=energy_unique_id,
+            sensor_config=sensor_config,
+            group_type=group_type,
+            entity_id=entity_id,
+        )
+    configure_group_history(hass, sensor, sensor_config, history_entry)
+    return sensor
 
-    return GroupedEnergySensor(
-        hass=hass,
-        name=name,
-        entities=energy_sensor_ids,
-        unique_id=energy_unique_id,
-        sensor_config=sensor_config,
-        group_type=group_type,
-        entity_id=entity_id,
-    )
+
+def configure_group_history(
+    hass: HomeAssistant, sensor: EnergySensor, config: ConfigType, entry: ConfigEntry | None = None
+) -> None:
+    if not config.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
+        return
+    from .history import HistoryImportError
+    from .history_sensor import GroupHistoryInitializer
+
+    if not isinstance(sensor, GroupedEnergySensor | VirtualEnergySensor):
+        raise HistoryImportError("History import requires a newly created group energy sensor")
+    sensor.group_history = GroupHistoryInitializer(hass, sensor, config, entry)
 
 
 def generate_unique_id(sensor_config: dict[str, Any]) -> str:
@@ -837,6 +800,14 @@ class GroupedEnergySensor(GroupedSensor, RestoreSensor, EnergySensor):
     _attr_state_class: SensorStateClass | None = SensorStateClass.TOTAL
     _is_energy_sensor = True
 
+    # HA permits live properties to override its writable cached attributes.
+    @property
+    def extra_state_attributes(self) -> Mapping[str, Any] | None:  # ty: ignore[invalid-property-type-override]
+        attributes = super().extra_state_attributes
+        if self.history_attributes:
+            return {**(attributes or {}), **self.history_attributes}
+        return attributes
+
     def __init__(
         self,
         hass: HomeAssistant,
@@ -866,11 +837,25 @@ class GroupedEnergySensor(GroupedSensor, RestoreSensor, EnergySensor):
     async def async_added_to_hass(self) -> None:
         """Register state listeners."""
 
+        if self.group_history is not None:
+            await self.group_history.async_added_to_hass()
+            return
+        await self.async_start_group_runtime()
+
+    async def async_start_group_runtime(self, seed: GroupHistorySeed | None = None) -> None:
+
         self._prev_state_store = await PreviousStateStore.async_get_instance(self.hass)
         # Clean up any entities that are no longer part of the group
         self._prev_state_store.cleanup_entity_states(self.entity_id, self._entities)
 
-        await self.restore_last_state()
+        if seed is None:
+            await self.restore_last_state()
+        else:
+            self._attr_state_class = SensorStateClass.TOTAL
+            self._set_native_value(seed.total, write_state=False)
+            for entity_id, state in seed.members.items():
+                self._prev_state_store.set_entity_state(self.entity_id, entity_id, state)
+            await self._prev_state_store.persist_states()
 
         await super().async_added_to_hass()
 

@@ -92,7 +92,7 @@
         },
         "title": "Opret en domænebaseret gruppesensor",
         "data_description": {
-          "group_energy_import_history": "Imports the existing consumption statistics of this domain’s energy sources once. The live counter starts with the current source counter total. Original data is preserved; missing measurements cannot be reconstructed."
+          "group_energy_import_history": "Imports the existing consumption statistics of this domain’s energy sources once to initialize the sensor. Live calculation and update intervals then follow the ordinary domain group, including power integration where applicable. Original data is preserved; missing measurements cannot be reconstructed."
         }
       },
       "fixed": {
@@ -311,7 +311,7 @@
         "data_description": {
           "entity_id": "Basisentiteten, som effekten skal trækkes fra",
           "subtract_entities": "Vælg alle de entiteter, du vil trække fra basisentiteten",
-          "group_energy_import_history": "Imports base consumption minus the selected partial consumptions from existing energy counters once. The live energy counter then uses the same sources and signs. Original data is preserved; missing measurements cannot be reconstructed.",
+          "group_energy_import_history": "Imports base consumption minus the selected partial consumptions from existing energy counters once to initialize the sensor. Live energy then uses the ordinary integration of the group’s power difference. Original data is preserved; missing measurements cannot be reconstructed.",
           "group_energy_base_entity": "For history import: the cumulative energy sensor matching the base power entity. Leave empty to use its existing Powercalc energy sensor.",
           "group_energy_subtract_entities": "For history import: select one cumulative energy sensor for every subtracted power entity. Leave empty to use existing Powercalc energy sensors. Power history is not converted into energy history."
         },
@@ -726,7 +726,7 @@
     },
     "group_history_partial": {
       "title": "History for {entity} is incomplete",
-      "description": "The import completed, but {intervals} historical intervals have missing source contributions. This can also happen when sources start recording at different times. Only consumption between adjacent known source statistics was included. Gaps and first observations do not establish measured zero consumption. Consumption across gaps was omitted, not distributed. Historical consumption may therefore be understated. New groups initialize the live counter from the source counter readings independently of these gaps."
+      "description": "The import completed, but {intervals} historical intervals have missing source contributions. This can also happen when sources start recording at different times. Only consumption between adjacent known source statistics was included. Gaps and first observations do not establish measured zero consumption. Consumption across gaps was omitted, not distributed. Historical consumption may therefore be understated. After initialization, live readings use the ordinary group implementation."
     }
   },
   "options": {
@@ -740,10 +740,7 @@
       "linear_mandatory": "Du skal angive mindst én af max_power eller calibrate",
       "linear_min_higher_as_max": "Maksimal effekt kan ikke være lavere end minimal effekt",
       "linear_unsupported_domain": "Entitetsdomænet understøttes ikke i lineær tilstand. Det skal være et af følgende: fan, light eller media_player. Du kan dog bruge kalibreringsindstillingen",
-      "unknown": "Der opstod en ukendt fejl. Se logfilerne for at få flere oplysninger",
-      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
-      "group_history_start_at_zero": "Disable Start at zero to import history. The group starts with the current source counter total; historical consumption is imported separately.",
-      "group_history_energy_sources": "History import needs the cumulative energy counter matching each power source. Select the base energy counter and one energy counter for each subtracted power source, or use sources with an unambiguous Powercalc energy counter."
+      "unknown": "Der opstod en ukendt fejl. Se logfilerne for at få flere oplysninger"
     },
     "step": {
       "advanced_options": {
@@ -1009,15 +1006,11 @@
       "group_subtract": {
         "data": {
           "entity_id": "Basisentitet",
-          "subtract_entities": "Træk enheder fra",
-          "group_energy_base_entity": "Base energy counter",
-          "group_energy_subtract_entities": "Energy counters to subtract"
+          "subtract_entities": "Træk enheder fra"
         },
         "data_description": {
           "entity_id": "Basisentiteten, som effekten skal trækkes fra",
-          "subtract_entities": "Vælg alle de entiteter, du vil trække fra basisentiteten",
-          "group_energy_base_entity": "For history import: the cumulative energy sensor matching the base power entity. Leave empty to use its existing Powercalc energy sensor.",
-          "group_energy_subtract_entities": "For history import: select one cumulative energy sensor for every subtracted power entity. Leave empty to use existing Powercalc energy sensors. Power history is not converted into energy history."
+          "subtract_entities": "Vælg alle de entiteter, du vil trække fra basisentiteten"
         },
         "title": "Gruppeindstillinger"
       },

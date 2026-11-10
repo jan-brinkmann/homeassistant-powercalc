@@ -16,6 +16,9 @@ from homeassistant.components.recorder.statistics import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir, recorder as recorder_helper
+from homeassistant.helpers.json import JSONEncoder
+from homeassistant.helpers.restore_state import async_get as get_restore_state_data
+from homeassistant.helpers.storage import Store
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from homeassistant.util.async_ import _SHUTDOWN_RUN_CALLBACK_THREADSAFE
@@ -43,7 +46,7 @@ from custom_components.powercalc.const import (
 from custom_components.powercalc.sensors.group.history import AggregationState, HistoryImportError, aggregate_statistics
 from custom_components.powercalc.sensors.group.history_import import GroupHistoryImport, ImportJournal, ImportPhase
 from custom_components.powercalc.sensors.group.history_recorder import HistoryRecorder, Period
-from custom_components.powercalc.sensors.group.history_sensor import HistoryGroupedEnergySensor
+from custom_components.powercalc.sensors.group.history_sensor import GroupHistoryInitializer
 from tests.common import create_mock_group_entry
 
 
@@ -146,9 +149,9 @@ async def test_import_live_transition_and_reload(
         hass.states.async_set("sensor.source", "unavailable" if unavailable else "300.700001", attributes)
         await async_wait_recording_done(hass)
         freezer.move_to(boundary + timedelta(minutes=2))
-        real_capture = HistoryGroupedEnergySensor._capture_live  # noqa: SLF001
+        real_capture = GroupHistoryInitializer._capture_handoff  # noqa: SLF001
 
-        async def capture_with_incoming_reading(sensor: HistoryGroupedEnergySensor, boundary: datetime) -> None:
+        async def capture_with_incoming_reading(sensor: GroupHistoryInitializer, boundary: datetime) -> None:
             importing = hass.states.get("sensor.history_energy")
             assert importing.state == "unknown"
             assert importing.attributes["history_import_status"] == "short_term"
@@ -159,7 +162,7 @@ async def test_import_live_transition_and_reload(
                 hass.states.async_set("sensor.source", "300.8", attributes)
                 await async_wait_recording_done(hass)
 
-        with patch.object(HistoryGroupedEnergySensor, "_capture_live", capture_with_incoming_reading):
+        with patch.object(GroupHistoryInitializer, "_capture_handoff", capture_with_incoming_reading):
             entry = await create_mock_group_entry(
                 hass,
                 "History",
@@ -172,11 +175,14 @@ async def test_import_live_transition_and_reload(
                 },
             )
             await hass.async_block_till_done(wait_background_tasks=True)
-        assert done.is_set()
         group = hass.states.get("sensor.history_energy")
-        assert group.attributes["history_import_status"] == "completed"
-        expected_first = 0.5 if unavailable else (0.8 if during_import else 0.700001)
-        assert float(group.state) == pytest.approx(300 + expected_first)
+        expected_first = 0.5 if unavailable else (0.8 if during_import else 0.7)
+        if unavailable:
+            assert group.state == "unavailable"
+        else:
+            assert done.is_set()
+            assert group.attributes["history_import_status"] == "completed"
+            assert float(group.state) == pytest.approx(300 + expected_first)
 
         freezer.move_to(boundary + timedelta(minutes=5))
         do_adhoc_statistics(hass, start=boundary)
@@ -200,7 +206,8 @@ async def test_import_live_transition_and_reload(
         rows = await hass.async_add_executor_job(
             lambda: statistics_during_period(hass, boundary, statistic_ids={"sensor.history_energy"}, period="5minute")
         )
-        assert [row["sum"] for row in rows["sensor.history_energy"]] == pytest.approx([expected_first, 0.9])
+        expected_sums = [0.9] if unavailable else [expected_first, 0.9]
+        assert [row["sum"] for row in rows["sensor.history_energy"]] == pytest.approx(expected_sums)
 
         # Exercise the recorder's real hourly rollup, not only its five-minute rows.
         for index, minute in enumerate(range(11, 60, 5), start=1):
@@ -226,11 +233,11 @@ async def test_import_live_transition_and_reload(
                 entry, data={**entry.data, CONF_GROUP_ENERGY_ENTITIES: ["sensor.replacement"]}
             )
             await hass.async_block_till_done(wait_background_tasks=True)
-        assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(301.9)
+        assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(1301.9)
         freezer.move_to(boundary + timedelta(minutes=62))
         hass.states.async_set("sensor.replacement", "1000.2", attributes)
         await hass.async_block_till_done()
-        assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(302.1)
+        assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(1302.1)
 
 
 async def test_import_batches_are_idempotent_and_detect_conflicts(hass: HomeAssistant, recorder_mock: Recorder) -> None:
@@ -492,6 +499,11 @@ async def test_completed_import_survives_home_assistant_restart(
             do_adhoc_statistics(hass, start=boundary)
             await async_wait_recording_done(hass)
             assert await hass.config_entries.async_unload(entry.entry_id)
+            # The HA test helper disables the restore-state store and periodic
+            # dumps. Enable real storage here to exercise the original restore path.
+            restore_data = get_restore_state_data(hass)
+            restore_data.store = Store(hass, 1, "core.restore_state", encoder=JSONEncoder)
+            await restore_data.async_dump_states()
             await hass.async_stop(force=True)
 
         # The pytest loop is reused for the second instance. Apply the same loop
@@ -500,6 +512,9 @@ async def test_completed_import_survives_home_assistant_restart(
         # No recorder caches, entity objects or group reference stores are reused.
         async with async_test_home_assistant(config_dir=hass.config.config_dir) as restarted:
             restarted.data.pop(loader.DATA_CUSTOM_COMPONENTS)
+            restore_data = get_restore_state_data(restarted)
+            restore_data.store = Store(restarted, 1, "core.restore_state", encoder=JSONEncoder)
+            await restore_data.async_load()
             try:
                 async with async_test_recorder(restarted):
                     assert await async_setup_component(restarted, "sensor", {})

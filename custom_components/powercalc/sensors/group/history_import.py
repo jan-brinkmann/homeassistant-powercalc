@@ -44,6 +44,7 @@ class ImportJournal:
     live_since: float = 0
     transition: float | None = None
     live_started: bool = False
+    runtime_handoff_complete: bool = False
     native_offset: float | None = None
     short_term_seeded: bool = False
     state_alignment_cursor: float = 0

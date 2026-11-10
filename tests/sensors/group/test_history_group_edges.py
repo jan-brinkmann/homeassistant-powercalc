@@ -27,8 +27,8 @@ from custom_components.powercalc.const import (
     GroupType,
     SensorType,
 )
-from custom_components.powercalc.errors import SensorConfigurationError
-from custom_components.powercalc.sensors.group.custom import GroupedEnergySensor
+from custom_components.powercalc.sensors.energy import RealEnergySensor
+from custom_components.powercalc.sensors.group.custom import GroupedEnergySensor, configure_group_history
 from custom_components.powercalc.sensors.group.history import HistoryImportError
 from custom_components.powercalc.sensors.group.history_recorder import HistoryRecorder
 from custom_components.powercalc.sensors.group.history_sources import (
@@ -138,18 +138,19 @@ async def test_counter_lookup_uses_persisted_powercalc_associations(hass: HomeAs
         find_energy_counter(hass, "sensor.power")
 
 
-async def test_subtract_factory_rejects_history_without_energy_sensor(hass: HomeAssistant) -> None:
-    with pytest.raises(SensorConfigurationError, match="energy sensor"):
-        create_subtract_group_sensors(
-            hass,
-            {
-                CONF_NAME: "History",
-                CONF_ENTITY_ID: "sensor.base",
-                CONF_SUBTRACT_ENTITIES: ["sensor.part"],
-                CONF_GROUP_ENERGY_IMPORT_HISTORY: True,
-                CONF_CREATE_ENERGY_SENSORS: False,
-            },
-        )
+async def test_history_flag_does_not_force_energy_sensor_creation(hass: HomeAssistant) -> None:
+    sensors = create_subtract_group_sensors(
+        hass,
+        {
+            CONF_NAME: "History",
+            CONF_ENTITY_ID: "sensor.base",
+            CONF_SUBTRACT_ENTITIES: ["sensor.part"],
+            CONF_GROUP_ENERGY_IMPORT_HISTORY: True,
+            CONF_CREATE_ENERGY_SENSORS: False,
+        },
+    )
+    assert len(sensors) == 1
+    assert sensors[0].device_class == "power"
 
 
 async def test_pending_import_freezes_the_source_signs(hass: HomeAssistant, pending_group: PendingGroup) -> None:
@@ -223,3 +224,8 @@ async def test_domain_history_keeps_diagnostics_with_extended_attributes_disable
     assert state.attributes["history_import_status"] == "completed"
     assert float(state.state) == pytest.approx(0.5)
     assert "entities" not in state.attributes
+
+
+async def test_import_cannot_take_ownership_of_an_existing_external_counter(hass: HomeAssistant) -> None:
+    with pytest.raises(HistoryImportError, match="newly created"):
+        configure_group_history(hass, RealEnergySensor("sensor.external"), {CONF_GROUP_ENERGY_IMPORT_HISTORY: True})

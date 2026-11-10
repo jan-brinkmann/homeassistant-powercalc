@@ -27,8 +27,8 @@ from custom_components.powercalc.sensors.group.history import (
     aggregate_statistics,
 )
 from custom_components.powercalc.sensors.group.history_import import ImportJournal
-from custom_components.powercalc.sensors.group.history_live import apply_source_state
 from custom_components.powercalc.sensors.group.history_sources import resolve_history_sources
+from custom_components.powercalc.sensors.group.history_transition import apply_source_state
 from tests.common import create_mock_group_entry
 
 
@@ -211,7 +211,7 @@ async def test_invalid_group_setup_creates_repair(hass: HomeAssistant, start_at_
             CONF_GROUP_ENERGY_ENTITIES: ["sensor.source"] if start_at_zero else [],
         },
     )
-    assert hass.states.get("sensor.history_energy") is None
+    assert hass.states.get("sensor.history_energy").attributes["history_import_status"] == "failed"
     assert any(
         domain == DOMAIN and issue.translation_key == "group_history_failed"
         for (domain, _), issue in ir.async_get(hass).issues.items()

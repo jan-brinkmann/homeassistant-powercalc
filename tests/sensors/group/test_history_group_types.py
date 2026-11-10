@@ -17,12 +17,12 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
 
 from custom_components.powercalc.const import (
     CONF_ENERGY_SENSOR_UNIT_PREFIX,
-    CONF_EXCLUDE_ENTITIES,
+    CONF_ENERGY_UPDATE_INTERVAL,
     CONF_GROUP_ENERGY_BASE_ENTITY,
     CONF_GROUP_ENERGY_ENTITIES,
     CONF_GROUP_ENERGY_IMPORT_HISTORY,
-    CONF_GROUP_ENERGY_START_AT_ZERO,
     CONF_GROUP_ENERGY_SUBTRACT_ENTITIES,
+    CONF_GROUP_ENERGY_UPDATE_INTERVAL,
     CONF_GROUP_TYPE,
     CONF_SUB_GROUPS,
     CONF_SUBTRACT_ENTITIES,
@@ -36,14 +36,14 @@ from custom_components.powercalc.const import (
 from custom_components.powercalc.sensors.energy import RealEnergySensor
 from custom_components.powercalc.sensors.group.history import AggregationState, HistoryImportError, aggregate_statistics
 from custom_components.powercalc.sensors.group.history_import import ImportJournal
-from custom_components.powercalc.sensors.group.history_live import apply_source_state
 from custom_components.powercalc.sensors.group.history_recorder import HistoryRecorder
 from custom_components.powercalc.sensors.group.history_sources import (
     find_energy_counter,
     resolve_history_source_weights,
 )
+from custom_components.powercalc.sensors.group.history_transition import apply_source_state
 from custom_components.powercalc.sensors.power import RealPowerSensor
-from tests.common import create_mock_group_entry, mock_entities_in_registry, run_powercalc_setup
+from tests.common import create_mock_group_entry, mock_entities_in_registry, run_powercalc_setup, set_states
 from tests.sensors.group.test_history_recorder import mock_recorder_before_hass as mock_recorder_before_hass
 
 
@@ -185,8 +185,9 @@ async def test_group_history_and_recorder_continuation(
         config = {
             CONF_GROUP_TYPE: GroupType.SUBTRACT if subtracting else GroupType.DOMAIN,
             CONF_GROUP_ENERGY_IMPORT_HISTORY: True,
-            CONF_GROUP_ENERGY_START_AT_ZERO: False,
             CONF_ENERGY_SENSOR_UNIT_PREFIX: UnitPrefix.KILO,
+            CONF_GROUP_ENERGY_UPDATE_INTERVAL: 0,
+            CONF_ENERGY_UPDATE_INTERVAL: 0,
         }
         if subtracting:
             config.update({CONF_ENTITY_ID: "sensor.a_power", CONF_SUBTRACT_ENTITIES: ["sensor.b_power"]})
@@ -199,69 +200,94 @@ async def test_group_history_and_recorder_continuation(
                 )
         else:
             config[CONF_DOMAIN] = "all" if group_kind == "all" else "light"
+        power_attributes = {"device_class": "power", "unit_of_measurement": "W"}
+        hass.states.async_set("sensor.a_power", "360", power_attributes)
+        hass.states.async_set("sensor.b_power", "180", power_attributes)
         entry = await create_mock_group_entry(hass, "History types", config)
+        ordinary_config = {key: value for key, value in config.items() if key != CONF_GROUP_ENERGY_IMPORT_HISTORY}
+        ordinary = await create_mock_group_entry(hass, "Ordinary types", ordinary_config)
         await hass.async_block_till_done(wait_background_tasks=True)
         target = "sensor.history_types_energy"
-        expected = 0.2 if subtracting else 1.2
-        native_offset = -600 if subtracting else 1200
-        state = hass.states.get(target)
-        assert state.attributes["history_import_status"] == "completed"
-        assert float(state.state) == pytest.approx(native_offset + expected)
+        ordinary_target = "sensor.ordinary_types_energy"
+        counter_group = group_kind == "all"
+        initial_consumption = 0.2 if subtracting else 1.2
+        initial = 1201.2 if counter_group else initial_consumption
+        if not counter_group:
+            expected_power = 180 if subtracting else 540
+            assert float(hass.states.get("sensor.history_types_power").state) == expected_power
+            assert float(hass.states.get("sensor.ordinary_types_power").state) == expected_power
+        assert float(hass.states.get(target).state) == pytest.approx(initial)
+        assert (
+            hass.states.get(target).attributes["state_class"]
+            == hass.states.get(ordinary_target).attributes["state_class"]
+        )
         rows = await HistoryRecorder(hass, target, "kWh").read([target], boundary - timedelta(hours=3), boundary)
         assert [row["sum"] for row in rows[target]] == pytest.approx([0, 0.1, 0.2] if subtracting else [0, 0.5, 1])
-        assert [row["state"] for row in rows[target]] == pytest.approx(
-            [row["sum"] + native_offset for row in rows[target]]
+        offset = 1200 if counter_group else 0
+        assert [row["state"] for row in rows[target]] == pytest.approx([row["sum"] + offset for row in rows[target]])
+
+        freezer.move_to(boundary + timedelta(minutes=3))
+        # HA 2026.4 dispatches the power group and integral in successive loop
+        # iterations. Drain both layers before comparing the published values.
+        await set_states(
+            hass,
+            [
+                ("sensor.a_power", "720", power_attributes),
+                ("sensor.a_energy", "300.8", attributes),
+                ("sensor.b_energy", "900.8", attributes),
+            ],
+            block_count=2,
         )
+        if not counter_group:
+            expected_power = 540 if subtracting else 900
+            assert float(hass.states.get("sensor.history_types_power").state) == expected_power
+            assert float(hass.states.get("sensor.ordinary_types_power").state) == expected_power
+        delta = 0.4 if counter_group else (0.003 if subtracting else 0.009)
+        assert float(hass.states.get(ordinary_target).state) == pytest.approx(delta)
+        assert float(hass.states.get(target).state) == pytest.approx(initial + delta)
+        await async_wait_recording_done(hass)
         freezer.move_to(boundary + timedelta(minutes=5))
         do_adhoc_statistics(hass, start=boundary)
         await async_wait_recording_done(hass)
-        freezer.move_to(boundary + timedelta(minutes=6))
-        hass.states.async_set("sensor.a_energy", "300.8", attributes)
-        hass.states.async_set("sensor.b_energy", "900.8", attributes)
-        await hass.async_block_till_done()
-        expected_after = 0 if subtracting else 1.6
-        assert float(hass.states.get(target).state) == pytest.approx(native_offset + expected_after)
-        with patch.object(HistoryRecorder, "import_batch", side_effect=AssertionError("Unexpected history reimport")):
+        rows = await HistoryRecorder(hass, target, "kWh").read(
+            [target], boundary, boundary + timedelta(minutes=5), "5minute"
+        )
+        assert rows[target][0]["sum"] == pytest.approx(initial_consumption + delta)
+
+        before_history = float(hass.states.get(target).state)
+        before_ordinary = float(hass.states.get(ordinary_target).state)
+        # The checkpoint and energy-source resolver have no role after handoff.
+        with (
+            patch.object(HistoryRecorder, "import_batch", side_effect=AssertionError("Unexpected history reimport")),
+            patch(
+                "custom_components.powercalc.sensors.group.history_sources.find_energy_counter",
+                side_effect=AssertionError("Unexpected history source lookup"),
+            ),
+        ):
             assert await hass.config_entries.async_reload(entry.entry_id)
+            assert await hass.config_entries.async_reload(ordinary.entry_id)
             await hass.async_block_till_done(wait_background_tasks=True)
-        assert float(hass.states.get(target).state) == pytest.approx(native_offset + expected_after)
-        freezer.move_to(boundary + timedelta(minutes=10))
-        do_adhoc_statistics(hass, start=boundary + timedelta(minutes=5))
-        await async_wait_recording_done(hass)
-        rows = await HistoryRecorder(hass, target, "kWh").read(
-            [target], boundary, boundary + timedelta(minutes=10), "5minute"
+            await hass.async_block_till_done()
+        # Older HA versions can publish an unavailable restored integral until
+        # the first valid power event. Compare the resumed totals after that event.
+        freezer.move_to(boundary + timedelta(minutes=6))
+        await set_states(
+            hass,
+            [
+                ("sensor.a_power", "1000", power_attributes),
+                ("sensor.a_energy", "300.9", attributes),
+                ("sensor.b_energy", "900.9", attributes),
+            ],
+            block_count=2,
         )
-        assert [row["sum"] for row in rows[target]] == pytest.approx([expected, expected_after])
-        freezer.move_to(boundary + timedelta(minutes=11))
-        changes = (
-            {
-                CONF_ENTITY_ID: "sensor.b_power",
-                CONF_SUBTRACT_ENTITIES: ["sensor.a_power"],
-                CONF_GROUP_ENERGY_BASE_ENTITY: "sensor.b_energy",
-                CONF_GROUP_ENERGY_SUBTRACT_ENTITIES: ["sensor.a_energy"],
-            }
-            if subtracting
-            else {CONF_EXCLUDE_ENTITIES: ["sensor.a_energy"]}
+        assert float(hass.states.get(target).state) - before_history == pytest.approx(
+            float(hass.states.get(ordinary_target).state) - before_ordinary
         )
-        with patch.object(HistoryRecorder, "import_batch", side_effect=AssertionError("Unexpected history reimport")):
-            hass.config_entries.async_update_entry(entry, data={**entry.data, **changes})
-            await hass.async_block_till_done(wait_background_tasks=True)
-        assert float(hass.states.get(target).state) == pytest.approx(native_offset + expected_after)
-        freezer.move_to(boundary + timedelta(minutes=12))
-        hass.states.async_set("sensor.a_energy", "300.9", attributes)
-        hass.states.async_set("sensor.b_energy", "900.85", attributes)
-        await hass.async_block_till_done()
-        assert float(hass.states.get(target).state) == pytest.approx(native_offset + (-0.05 if subtracting else 1.65))
-        await async_wait_recording_done(hass)
-        freezer.move_to(boundary + timedelta(minutes=15))
-        do_adhoc_statistics(hass, start=boundary + timedelta(minutes=10))
-        await async_wait_recording_done(hass)
-        rows = await HistoryRecorder(hass, target, "kWh").read(
-            [target], boundary, boundary + timedelta(minutes=15), "5minute"
-        )
-        assert [row["sum"] for row in rows[target]] == pytest.approx(
-            [expected, expected_after, -0.05 if subtracting else 1.65]
-        )
+        for entity in [target, ordinary_target]:
+            await hass.services.async_call(
+                DOMAIN, "calibrate_energy", {"entity_id": entity, "value": "10"}, blocking=True
+            )
+            assert float(hass.states.get(entity).state) == 10
 
 
 @pytest.mark.parametrize("problem", ["count", "overlap", "conflict", "double"])

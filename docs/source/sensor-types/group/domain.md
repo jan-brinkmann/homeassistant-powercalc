@@ -26,8 +26,10 @@ powercalc:
 
 When creating a domain group in the UI, you can enable **Import energy long-term statistics from
 sources once**. The group imports the consumption statistics of its existing energy sources and
-continues from that total. The `all` domain excludes group outputs to prevent duplicate counting.
-Exclusions also apply to the historical source selection.
+uses them to initialize its ordinary energy sensor. Specific domains retain the original power
+integration; `all` retains the original grouped energy counter. The historical `all` selection
+excludes group outputs to prevent duplicate counting. Exclusions also apply to that selection.
+Live calculation, membership, and update intervals use the original implementation in both cases.
 
 See [Importing group energy history](energy-history.md) for source requirements, missing-data
 handling and the transition to live readings. Reloading or changing the domain does not import

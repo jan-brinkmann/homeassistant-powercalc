@@ -135,7 +135,7 @@ async def test_history_import_rejects_conflicting_options(
     assert result["errors"] == {"base": error}
 
 
-async def test_history_import_prevents_force_calculation_in_options(hass: HomeAssistant) -> None:
+async def test_history_does_not_change_force_calculation_options(hass: HomeAssistant) -> None:
     entry = await create_mock_group_entry(
         hass,
         "History",
@@ -149,7 +149,7 @@ async def test_history_import_prevents_force_calculation_in_options(hass: HomeAs
     )
     result = await initialize_options_flow(hass, entry, Step.GROUP_CUSTOM)
     result = await submit_options_step(hass, result, {CONF_FORCE_CALCULATE_GROUP_ENERGY: True})
-    assert result["errors"] == {"base": "group_history_requires_energy"}
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
 
 
 async def test_create_group_entry_without_unique_id(hass: HomeAssistant) -> None:

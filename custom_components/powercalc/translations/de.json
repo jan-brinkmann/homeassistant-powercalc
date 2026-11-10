@@ -92,7 +92,7 @@
         },
         "title": "Einen Domain-basierten Gruppensensor erstellen",
         "data_description": {
-          "group_energy_import_history": "Übernimmt die vorhandenen Verbrauchsstatistiken der Energiequellen dieser Domäne einmalig. Der laufende Zähler beginnt mit der aktuellen Summe der Quellzähler. Die Originaldaten bleiben erhalten; fehlende Messwerte können nicht rekonstruiert werden."
+          "group_energy_import_history": "Übernimmt die vorhandenen Verbrauchsstatistiken der Energiequellen dieser Domäne einmalig zur Initialisierung des Sensors. Danach gelten die normale Berechnung und die Aktualisierungsintervalle der Domänengruppe, gegebenenfalls einschließlich Leistungsintegration. Die Originaldaten bleiben erhalten; fehlende Messwerte können nicht rekonstruiert werden."
         }
       },
       "fixed": {
@@ -311,7 +311,7 @@
         "data_description": {
           "entity_id": "Die Basis-Entität, von der die Leistung abgezogen wird",
           "subtract_entities": "Wählen Sie alle Entitäten aus, die Sie von der Basiseinheit abziehen möchten",
-          "group_energy_import_history": "Übernimmt den Basisverbrauch abzüglich der Teilverbräuche aus den vorhandenen Energiezählern einmalig. Der laufende Energiezähler verwendet anschließend dieselben Quellen und Vorzeichen. Die Originaldaten bleiben erhalten; fehlende Messwerte können nicht rekonstruiert werden.",
+          "group_energy_import_history": "Übernimmt den Basisverbrauch abzüglich der Teilverbräuche aus den vorhandenen Energiezählern einmalig zur Initialisierung des Sensors. Danach wird die Energie wie bei einer normalen Subtraktionsgruppe aus der Leistungsdifferenz integriert. Die Originaldaten bleiben erhalten; fehlende Messwerte können nicht rekonstruiert werden.",
           "group_energy_base_entity": "Für die Historienübernahme: der kumulative Energiezähler der Basis-Leistungsquelle. Leer lassen, um den vorhandenen Powercalc-Energiezähler zu verwenden.",
           "group_energy_subtract_entities": "Für die Historienübernahme: je einen kumulativen Energiezähler pro abzuziehender Leistungsquelle auswählen. Leer lassen, um vorhandene Powercalc-Energiezähler zu verwenden. Aus einer Leistungshistorie wird keine Energiehistorie rekonstruiert."
         },
@@ -726,7 +726,7 @@
     },
     "group_history_partial": {
       "title": "Die Historie von {entity} ist unvollständig",
-      "description": "Die Übernahme wurde abgeschlossen, aber in {intervals} historischen Intervallen fehlen Beiträge einzelner Quellen. Das kann auch durch unterschiedliche Aufzeichnungsanfänge entstehen. Übernommen wurde nur Verbrauch zwischen unmittelbar aufeinanderfolgenden bekannten Quellstatistiken. Lücken und erste Messpunkte belegen keinen Nullverbrauch. Verbrauch über Lücken hinweg wurde ausgelassen und nicht verteilt. Der historische Verbrauch kann daher zu niedrig ausfallen. Neu angelegte Gruppen initialisieren den Live-Zählerstand anhand der Quellzählerstände unabhängig von diesen Lücken."
+      "description": "Die Übernahme wurde abgeschlossen, aber in {intervals} historischen Intervallen fehlen Beiträge einzelner Quellen. Das kann auch durch unterschiedliche Aufzeichnungsanfänge entstehen. Übernommen wurde nur Verbrauch zwischen unmittelbar aufeinanderfolgenden bekannten Quellstatistiken. Lücken und erste Messpunkte belegen keinen Nullverbrauch. Verbrauch über Lücken hinweg wurde ausgelassen und nicht verteilt. Der historische Verbrauch kann daher zu niedrig ausfallen. Nach der Initialisierung verwendet der laufende Sensor die normale Gruppenimplementierung."
     }
   },
   "options": {
@@ -740,10 +740,7 @@
       "linear_mandatory": "Sie müssen mindestens Maximale Leistung oder Kalibrierung angeben",
       "linear_min_higher_as_max": "Maximale Leistung kann nicht niedriger sein als Minimale Leistung",
       "linear_unsupported_domain": "Domäne der Entität wird für den linearen Modus nicht unterstützt. Muss einer der folgenden Werte sein: Ventilator, Licht oder Mediaplayer. Sie können jedoch die Kalibrierungsoption verwenden",
-      "unknown": "Unbekannter Fehler aufgetreten, bitte sehe in die Logs für weitere Informationen",
-      "group_history_requires_energy": "Die Historienübernahme benötigt einen Energiesensor und ist mit der erzwungenen Energieberechnung nicht kombinierbar.",
-      "group_history_start_at_zero": "Deaktiviere „Bei null beginnen“, um die Historie zu übernehmen. Die Gruppe beginnt mit der aktuellen Summe der Quellzähler; der historische Verbrauch wird getrennt übernommen.",
-      "group_history_energy_sources": "Für jede Leistungsquelle wird ein zugehöriger kumulativer Energiezähler benötigt. Wähle den Basis-Energiezähler und je einen Energiezähler pro abzuziehender Leistungsquelle aus oder verwende Quellen mit eindeutig zugeordneten Powercalc-Energiezählern."
+      "unknown": "Unbekannter Fehler aufgetreten, bitte sehe in die Logs für weitere Informationen"
     },
     "step": {
       "advanced_options": {
@@ -1009,15 +1006,11 @@
       "group_subtract": {
         "data": {
           "entity_id": "Basis-Entität",
-          "subtract_entities": "Abzuziehende Entitäten",
-          "group_energy_base_entity": "Basis-Energiezähler",
-          "group_energy_subtract_entities": "Abzuziehende Energiezähler"
+          "subtract_entities": "Abzuziehende Entitäten"
         },
         "data_description": {
           "entity_id": "Die Basis-Entität, von der die Leistung abgezogen wird",
-          "subtract_entities": "Wählen Sie alle Entitäten aus, die Sie von der Basis-Entität abziehen möchten",
-          "group_energy_base_entity": "Für die Historienübernahme: der kumulative Energiezähler der Basis-Leistungsquelle. Leer lassen, um den vorhandenen Powercalc-Energiezähler zu verwenden.",
-          "group_energy_subtract_entities": "Für die Historienübernahme: je einen kumulativen Energiezähler pro abzuziehender Leistungsquelle auswählen. Leer lassen, um vorhandene Powercalc-Energiezähler zu verwenden. Aus einer Leistungshistorie wird keine Energiehistorie rekonstruiert."
+          "subtract_entities": "Wählen Sie alle Entitäten aus, die Sie von der Basis-Entität abziehen möchten"
         },
         "title": "Gruppeneinstellungen"
       },

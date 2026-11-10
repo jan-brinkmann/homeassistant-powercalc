@@ -2,9 +2,13 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import inspect
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.integration.sensor import IntegrationSensor, IntegrationSensorExtraStoredData
+from homeassistant.components.integration.sensor import (
+    IntegrationSensor,
+    IntegrationSensorExtraStoredData,
+    _IntegrationTrigger,
+)
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN, SensorDeviceClass, SensorStateClass
 from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
@@ -50,7 +54,11 @@ from .abstract import (
     generate_standby_energy_sensor_entity_id,
     generate_standby_energy_sensor_name,
 )
+from .group.history_seed import GroupHistorySeed
 from .power import PowerSensor, RealPowerSensor, VirtualPowerSensor
+
+if TYPE_CHECKING:
+    from .group.history_sensor import GroupHistoryInitializer
 
 ENERGY_ICON = "mdi:lightning-bolt"
 ENTITY_ID_FORMAT = SENSOR_DOMAIN + ".{}"
@@ -283,6 +291,19 @@ def _find_related_real_energy_sensor(
 class EnergySensor(BaseEntity):
     """Class which all energy sensors should extend from."""
 
+    group_history: GroupHistoryInitializer | None = None
+    history_attributes: dict[str, Any] | None = None
+    _attr_state_class: SensorStateClass | None
+
+    @callback
+    def async_set_history_progress(self, attributes: dict[str, Any], importing: bool = False) -> None:
+        if importing:
+            self._attr_state_class = None
+        current_attributes = getattr(self, "_attr_extra_state_attributes", None) or {}
+        self._attr_extra_state_attributes = {**current_attributes, **attributes}
+        self.history_attributes = {**(self.history_attributes or {}), **attributes}
+        self.async_write_ha_state()
+
 
 class VirtualEnergyExtraStoredData(IntegrationSensorExtraStoredData):
     """Preserve zero totals which HA's integration serializer treats as missing."""
@@ -359,6 +380,26 @@ class VirtualEnergySensor(IntegrationSensor, EnergySensor):
         )
         self._last_accepted_value: float | None = None
         self._last_rejected_value: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        if self.group_history is not None:
+            await self.group_history.async_added_to_hass()
+            return
+        await self.async_start_group_runtime()
+
+    def prepare_group_history_unit(self) -> None:
+        if state := self.hass.states.get(self._source_entity):
+            self._derive_and_set_attributes_from_state(state)
+
+    async def async_start_group_runtime(self, seed: GroupHistorySeed | None = None) -> None:
+        await super().async_added_to_hass()
+        if seed is not None:
+            self._state = seed.total
+            self._last_valid_state = seed.total
+            self._last_integration_time = seed.timestamp
+            self._last_integration_trigger = _IntegrationTrigger.TimeElapsed
+            self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+            self.async_write_ha_state()
 
     def _integrate_on_state_change(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Override to add outlier filtering.
@@ -442,10 +483,13 @@ class VirtualEnergySensor(IntegrationSensor, EnergySensor):
     def extra_state_attributes(self) -> dict[str, str] | None:
         """Return the state attributes of the energy sensor."""
         if self._sensor_config.get(CONF_DISABLE_EXTENDED_ATTRIBUTES):
-            return super().extra_state_attributes
+            attributes = super().extra_state_attributes
+            if self.history_attributes:
+                return {**(attributes or {}), **self.history_attributes}
+            return attributes
 
         if self._powercalc_source_entity is None:
-            return None
+            return self.history_attributes
 
         attrs = {
             ATTR_SOURCE_ENTITY: self._powercalc_source_entity or "",

@@ -24,7 +24,8 @@ with the current sum of its source counters, just like a group without history a
 start setting. Historical consumption is imported separately and does not change that initial reading.
 
 The original source statistics remain unchanged. The import combines hourly consumption statistics,
-then continues the group with live readings. It does not reconstruct power, raw-state, cost or
+then hands over to the original grouped energy sensor, including its normal update interval,
+rounding, restore, reset, and calibration behavior. It does not reconstruct power, raw-state, cost or
 utility-meter history. Reloading, restarting or changing members after completion does not repeat it.
 
 See [Importing group energy history](energy-history.md) for supported sources, missing data,

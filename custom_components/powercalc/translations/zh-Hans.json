@@ -92,7 +92,7 @@
         },
         "title": "创建基于域的组传感器",
         "data_description": {
-          "group_energy_import_history": "Imports the existing consumption statistics of this domain’s energy sources once. The live counter starts with the current source counter total. Original data is preserved; missing measurements cannot be reconstructed."
+          "group_energy_import_history": "Imports the existing consumption statistics of this domain’s energy sources once to initialize the sensor. Live calculation and update intervals then follow the ordinary domain group, including power integration where applicable. Original data is preserved; missing measurements cannot be reconstructed."
         }
       },
       "fixed": {
@@ -311,7 +311,7 @@
         "data_description": {
           "entity_id": "要从中减去功率的基础实体",
           "subtract_entities": "选择要从基础实体中减去的所有实体",
-          "group_energy_import_history": "Imports base consumption minus the selected partial consumptions from existing energy counters once. The live energy counter then uses the same sources and signs. Original data is preserved; missing measurements cannot be reconstructed.",
+          "group_energy_import_history": "Imports base consumption minus the selected partial consumptions from existing energy counters once to initialize the sensor. Live energy then uses the ordinary integration of the group’s power difference. Original data is preserved; missing measurements cannot be reconstructed.",
           "group_energy_base_entity": "For history import: the cumulative energy sensor matching the base power entity. Leave empty to use its existing Powercalc energy sensor.",
           "group_energy_subtract_entities": "For history import: select one cumulative energy sensor for every subtracted power entity. Leave empty to use existing Powercalc energy sensors. Power history is not converted into energy history."
         },
@@ -726,7 +726,7 @@
     },
     "group_history_partial": {
       "title": "History for {entity} is incomplete",
-      "description": "The import completed, but {intervals} historical intervals have missing source contributions. This can also happen when sources start recording at different times. Only consumption between adjacent known source statistics was included. Gaps and first observations do not establish measured zero consumption. Consumption across gaps was omitted, not distributed. Historical consumption may therefore be understated. New groups initialize the live counter from the source counter readings independently of these gaps."
+      "description": "The import completed, but {intervals} historical intervals have missing source contributions. This can also happen when sources start recording at different times. Only consumption between adjacent known source statistics was included. Gaps and first observations do not establish measured zero consumption. Consumption across gaps was omitted, not distributed. Historical consumption may therefore be understated. After initialization, live readings use the ordinary group implementation."
     }
   },
   "options": {
@@ -740,10 +740,7 @@
       "linear_mandatory": "必须至少提供 max_power 或 calibrate 中的一项",
       "linear_min_higher_as_max": "最大功率不能低于最小功率",
       "linear_unsupported_domain": "线性模式不支持此实体域。必须是 fan、light 或 mediaplayer 之一，但仍可使用 calibrate 选项",
-      "unknown": "发生未知错误，详情请查看日志",
-      "group_history_requires_energy": "History import requires an energy sensor and cannot be combined with Force calculate energy.",
-      "group_history_start_at_zero": "Disable Start at zero to import history. The group starts with the current source counter total; historical consumption is imported separately.",
-      "group_history_energy_sources": "History import needs the cumulative energy counter matching each power source. Select the base energy counter and one energy counter for each subtracted power source, or use sources with an unambiguous Powercalc energy counter."
+      "unknown": "发生未知错误，详情请查看日志"
     },
     "step": {
       "advanced_options": {
@@ -1009,15 +1006,11 @@
       "group_subtract": {
         "data": {
           "entity_id": "基础实体",
-          "subtract_entities": "减去实体",
-          "group_energy_base_entity": "Base energy counter",
-          "group_energy_subtract_entities": "Energy counters to subtract"
+          "subtract_entities": "减去实体"
         },
         "data_description": {
           "entity_id": "要从中减去功率的基础实体",
-          "subtract_entities": "选择要从基础实体中减去的所有实体",
-          "group_energy_base_entity": "For history import: the cumulative energy sensor matching the base power entity. Leave empty to use its existing Powercalc energy sensor.",
-          "group_energy_subtract_entities": "For history import: select one cumulative energy sensor for every subtracted power entity. Leave empty to use existing Powercalc energy sensors. Power history is not converted into energy history."
+          "subtract_entities": "选择要从基础实体中减去的所有实体"
         },
         "title": "组选项"
       },

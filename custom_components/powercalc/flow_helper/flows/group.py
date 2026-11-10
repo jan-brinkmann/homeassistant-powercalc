@@ -476,12 +476,9 @@ class GroupConfigFlow(GroupFlow):
             if group_type == GroupType.CUSTOM:
                 validate_group_input(ui)
             else:
-                if ui.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
-                    ui.setdefault(CONF_GROUP_ENERGY_START_AT_ZERO, False)
-                validate_history_input(ui)
+                validate_history_input({**ui, CONF_GROUP_ENERGY_START_AT_ZERO: False})
             if group_type == GroupType.SUBTRACT:
-                if ui.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
-                    ui[CONF_SUBTRACT_ENTITIES] = list(dict.fromkeys(ui.get(CONF_SUBTRACT_ENTITIES) or []))
+                ui.setdefault(CONF_SUBTRACT_ENTITIES, [])
                 validate_subtract_history_input(self.flow.hass, ui)
             if not ui.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
                 ui.pop(CONF_GROUP_ENERGY_IMPORT_HISTORY, None)
@@ -582,18 +579,10 @@ class GroupOptionsFlow(GroupFlow):
     async def async_step_group_custom(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the group options flow."""
 
-        def validate_history_options(ui: dict[str, Any]) -> dict[str, str] | None:
-            if self.flow.sensor_config.get(CONF_GROUP_ENERGY_IMPORT_HISTORY) and ui.get(
-                CONF_FORCE_CALCULATE_GROUP_ENERGY
-            ):
-                return {"base": "group_history_requires_energy"}
-            return None
-
         return await self.flow.async_handle_options_step(
             user_input,
             create_schema_group_custom(self.flow.hass, self.flow.config_entry, True),
             Step.GROUP_CUSTOM,
-            validate=validate_history_options,
         )
 
     async def async_step_group_domain(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -602,20 +591,7 @@ class GroupOptionsFlow(GroupFlow):
 
     async def async_step_group_subtract(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the group options flow."""
-        schema = SCHEMA_GROUP_SUBTRACT_OPTIONS
-        if self.flow.sensor_config.get(CONF_GROUP_ENERGY_IMPORT_HISTORY):
-            schema = schema.extend(SCHEMA_GROUP_SUBTRACT_HISTORY.schema)
-
-        def validate_sources(ui: dict[str, Any]) -> dict[str, str] | None:
-            try:
-                validate_subtract_history_input(self.flow.hass, {**self.flow.sensor_config, **ui})
-            except SchemaFlowError as error:
-                return {"base": str(error)}
-            return None
-
-        return await self.flow.async_handle_options_step(
-            user_input, schema, Step.GROUP_SUBTRACT, validate=validate_sources
-        )
+        return await self.flow.async_handle_options_step(user_input, SCHEMA_GROUP_SUBTRACT_OPTIONS, Step.GROUP_SUBTRACT)
 
     async def async_step_group_tracked_untracked(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the group options flow."""

@@ -1,12 +1,11 @@
 """Regression cases for events arriving at the historical/live handoff."""
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest.mock import patch
 
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.storage import Store
 import pytest
 from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
@@ -16,7 +15,7 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
 from custom_components.powercalc.sensors.group.history import HistoryImportError
 from custom_components.powercalc.sensors.group.history_import import GroupHistoryImport, ImportPhase
 from custom_components.powercalc.sensors.group.history_recorder import HistoryRecorder
-from custom_components.powercalc.sensors.group.history_sensor import HistoryGroupedEnergySensor
+from custom_components.powercalc.sensors.group.history_sensor import GroupHistoryInitializer
 from tests.sensors.group.test_history_failures import PendingGroup, pending_group as pending_group, setup_pending_group
 from tests.sensors.group.test_history_recorder import mock_recorder_before_hass as mock_recorder_before_hass
 
@@ -40,84 +39,36 @@ async def test_reading_at_capture_time_is_included(
     assert [row["sum"] for row in rows["sensor.history_energy"]] == pytest.approx([0.7])
 
 
-@pytest.mark.timeout(60)
-async def test_reload_replays_all_buffered_reset_readings(
+async def test_completed_reload_uses_original_counter_semantics(
     hass: HomeAssistant, pending_group: PendingGroup, freezer: FrozenDateTimeFactory
 ) -> None:
     await setup_pending_group(hass, pending_group)
-    assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(0.5)
-    freezer.move_to(pending_group.boundary + timedelta(minutes=3))
-    replay = HistoryGroupedEnergySensor._replay_history  # noqa: SLF001
-
-    async def replay_with_incoming_reset(sensor: HistoryGroupedEnergySensor, start: datetime, end: datetime) -> None:
-        await replay(sensor, start, end)
-        reset = pending_group.boundary.isoformat()
-        for second, value, attributes in [
-            [1, "301", ATTRIBUTES],
-            [2, "0.1", {**ATTRIBUTES, "last_reset": reset}],
-            [3, "0.2", {**ATTRIBUTES, "last_reset": reset}],
-        ]:
-            freezer.move_to(pending_group.boundary + timedelta(minutes=3, seconds=second))
-            hass.states.async_set("sensor.source", value, attributes)
-            await hass.async_block_till_done()
-
-    with patch.object(HistoryGroupedEnergySensor, "_replay_history", replay_with_incoming_reset):
+    with patch.object(GroupHistoryInitializer, "_replay_history", side_effect=AssertionError("Unexpected replay")):
         assert await hass.config_entries.async_reload(pending_group.entry.entry_id)
         await hass.async_block_till_done(wait_background_tasks=True)
-    assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(1.7)
-    freezer.move_to(pending_group.boundary + timedelta(minutes=5))
-    do_adhoc_statistics(hass, start=pending_group.boundary)
-    await async_wait_recording_done(hass)
-    rows = await pending_group.job.recorder.read(
-        ["sensor.history_energy", "sensor.source"],
-        pending_group.boundary,
-        pending_group.boundary + timedelta(minutes=5),
-        "5minute",
-    )
-    assert rows["sensor.source"][0]["sum"] == pytest.approx(101.2)
-    assert rows["sensor.history_energy"][0]["sum"] == pytest.approx(1.7)
+    for minute, value in [[3, "301"], [4, "0.1"], [5, "0.2"]]:
+        freezer.move_to(pending_group.boundary + timedelta(minutes=minute))
+        hass.states.async_set("sensor.source", value, ATTRIBUTES)
+        await hass.async_block_till_done()
+    # The original group skips a negative counter delta and continues from it.
+    assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(1.6)
 
 
-@pytest.mark.timeout(60)
-async def test_startup_and_live_updates_keep_one_durable_checkpoint(
+async def test_completed_import_checkpoint_is_not_a_live_store(
     hass: HomeAssistant, pending_group: PendingGroup, freezer: FrozenDateTimeFactory
 ) -> None:
-    capture = HistoryGroupedEnergySensor._capture_live  # noqa: SLF001
-    save = Store.async_save
-    injected = False
-
-    async def capture_with_buffer(sensor: HistoryGroupedEnergySensor, boundary: datetime) -> None:
-        await capture(sensor, boundary)
-        freezer.move_to(boundary + timedelta(minutes=2, seconds=1))
-        hass.states.async_set("sensor.source", "300.2", ATTRIBUTES)
+    await setup_pending_group(hass, pending_group)
+    completed = await pending_group.job.store.async_load()
+    for second, value in [[1, "300.2"], [2, "300.4"]]:
+        freezer.move_to(pending_group.boundary + timedelta(minutes=2, seconds=second))
+        hass.states.async_set("sensor.source", value, ATTRIBUTES)
         await hass.async_block_till_done()
-
-    async def delayed_write(store: Store, data: dict) -> None:
-        nonlocal injected
-        if (
-            store.key.startswith("powercalc_group_history.")
-            and data.get("live_total") == pytest.approx(0.7)
-            and not injected
-        ):
-            injected = True
-            freezer.move_to(pending_group.boundary + timedelta(minutes=2, seconds=2))
-            hass.states.async_set("sensor.source", "300.4", ATTRIBUTES)
-            await hass.async_block_till_done()
-        await save(store, data)
-
-    with (
-        patch.object(HistoryGroupedEnergySensor, "_capture_live", capture_with_buffer),
-        patch.object(Store, "async_save", delayed_write),
-    ):
-        await setup_pending_group(hass, pending_group)
-    state = hass.states.get("sensor.history_energy")
-    assert injected
-    assert state.attributes["history_import_status"] == "completed"
-    assert float(state.state) == pytest.approx(0.9)
-    restored = GroupHistoryImport(hass, str(pending_group.entry.unique_id) + "_energy", "sensor.history_energy", "kWh")
-    await restored.load(["sensor.source"])
-    assert restored.journal.live_total == pytest.approx(0.9)
-    assert restored.journal.members["sensor.source"]["value"] == pytest.approx(300.4)
+    assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(0.9)
+    assert await pending_group.job.store.async_load() == completed
+    with patch.object(GroupHistoryImport, "save", side_effect=AssertionError("Unexpected live journal write")):
+        assert await hass.config_entries.async_reload(pending_group.entry.entry_id)
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert float(hass.states.get("sensor.history_energy").state) == pytest.approx(0.9)
 
 
 @pytest.mark.timeout(60)
@@ -203,7 +154,9 @@ async def test_completed_legacy_journal_does_not_reimport(hass: HomeAssistant, p
     stored = await pending_group.job.store.async_load()
     assert stored is not None
     legacy = {
-        key: value for key, value in stored.items() if key not in ["live_started", "native_offset", "short_term_seeded"]
+        key: value
+        for key, value in stored.items()
+        if key not in ["live_started", "native_offset", "short_term_seeded", "runtime_handoff_complete"]
     }
     await pending_group.job.store.async_save(legacy)
     with patch.object(HistoryRecorder, "import_batch", side_effect=AssertionError("Unexpected reimport")):

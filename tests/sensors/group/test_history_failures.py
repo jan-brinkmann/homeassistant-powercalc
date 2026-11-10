@@ -10,7 +10,6 @@ from homeassistant.components.recorder import Recorder
 from homeassistant.components.recorder.statistics import StatisticsRow
 from homeassistant.const import EVENT_RECORDER_5MIN_STATISTICS_GENERATED
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
@@ -237,7 +236,7 @@ async def test_transition_failure_is_reported(hass: HomeAssistant, pending_group
         assert_failure(hass, "database is unavailable")
 
 
-async def test_partial_import_warns_and_invalid_live_updates_stop_the_sensor(
+async def test_partial_import_warns_and_original_calibration_is_available(
     hass: HomeAssistant, pending_group: PendingGroup, freezer: FrozenDateTimeFactory
 ) -> None:
     pending_group.job.journal.aggregation.missing_intervals = 2
@@ -245,17 +244,15 @@ async def test_partial_import_warns_and_invalid_live_updates_stop_the_sensor(
     await setup_pending_group(hass, pending_group)
     assert hass.states.get("sensor.history_energy").attributes["history_incomplete_intervals"] == 2
     assert any(issue.translation_key == "group_history_partial" for issue in ir.async_get(hass).issues.values())
-    for service, data in [("reset_energy", {}), ("calibrate_energy", {"value": "10"})]:
-        with pytest.raises(HomeAssistantError, match="not supported"):
-            await hass.services.async_call(
-                DOMAIN, service, {"entity_id": "sensor.history_energy", **data}, blocking=True
-            )
-    hass.states.async_remove("sensor.source")
+    await hass.services.async_call(
+        DOMAIN, "calibrate_energy", {"entity_id": "sensor.history_energy", "value": "10"}, blocking=True
+    )
+    assert float(hass.states.get("sensor.history_energy").state) == 10
+    freezer.tick(timedelta(minutes=1))
+    hass.states.async_set("sensor.source", "invalid", {"unit_of_measurement": "kWh", "state_class": "total"})
     await hass.async_block_till_done()
-    freezer.tick(timedelta(seconds=1))
-    hass.states.async_set("sensor.source", "1", {"unit_of_measurement": "W", "state_class": "total"})
-    await hass.async_block_till_done()
-    assert_failure(hass, "Unsupported energy unit")
+    assert float(hass.states.get("sensor.history_energy").state) == 10
+    assert hass.states.get("sensor.history_energy").attributes["history_import_status"] == "completed"
 
 
 async def test_transition_waits_for_recorder_event(hass: HomeAssistant, pending_group: PendingGroup) -> None:
