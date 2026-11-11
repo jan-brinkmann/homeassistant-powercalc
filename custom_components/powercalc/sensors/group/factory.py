@@ -8,6 +8,7 @@ from custom_components.powercalc.analytics.analytics import collect_analytics
 from custom_components.powercalc.const import CONF_GROUP_TYPE, DATA_GROUP_TYPES, GroupType
 from custom_components.powercalc.errors import SensorConfigurationError
 import custom_components.powercalc.sensors.group.custom as custom_group
+from custom_components.powercalc.sensors.group.difference import create_difference_group_sensors
 import custom_components.powercalc.sensors.group.standby as standby_group
 import custom_components.powercalc.sensors.group.subtract as subtract_group
 from custom_components.powercalc.sensors.group.tracked_untracked import TrackedPowerSensorFactory
@@ -38,6 +39,9 @@ async def create_group_sensors(
         )
     if group_type == GroupType.STANDBY:
         return standby_group.create_general_standby_sensors(hass, sensor_config)
+
+    if group_type == GroupType.DIFFERENCE:
+        return await create_difference_group_sensors(hass, sensor_config)
 
     if group_type == GroupType.CUSTOM:
         if config_entry:

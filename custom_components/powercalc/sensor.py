@@ -160,7 +160,7 @@ async def async_setup_platform(
     if discovery_info:
         config = convert_discovery_info_to_sensor_config(discovery_info)
 
-    if config.get(CONF_GROUP_TYPE) == GroupType.SUBTRACT:
+    if config.get(CONF_GROUP_TYPE) in [GroupType.SUBTRACT, GroupType.DIFFERENCE]:
         config[CONF_SENSOR_TYPE] = SensorType.GROUP
 
     if CONF_CREATE_GROUP in config:

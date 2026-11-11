@@ -370,6 +370,7 @@ def create_grouped_power_sensor(
     group_type: GroupType,
     sensor_config: ConfigType,
     power_sensor_ids: set[str],
+    member_weights: dict[str, int] | None = None,
 ) -> GroupedPowerSensor:
     name = generate_power_sensor_name(sensor_config, group_name)
     unique_id = sensor_config.get(CONF_UNIQUE_ID)
@@ -392,6 +393,7 @@ def create_grouped_power_sensor(
         sensor_config=sensor_config,
         group_type=group_type,
         entity_id=entity_id,
+        member_weights=member_weights,
     )
 
 
@@ -403,6 +405,7 @@ def create_grouped_energy_sensor(
     sensor_config: ConfigType,
     energy_sensor_ids: set[str],
     power_sensor: GroupedPowerSensor | None,
+    member_weights: dict[str, int] | None = None,
 ) -> EnergySensor:
     name = generate_energy_sensor_name(sensor_config, group_name)
     unique_id = sensor_config.get(CONF_UNIQUE_ID)
@@ -423,6 +426,8 @@ def create_grouped_energy_sensor(
         should_create_riemann = True
     if group_type == GroupType.DOMAIN and sensor_config.get(CONF_DOMAIN) == "all":
         should_create_riemann = False
+    if member_weights is not None:
+        should_create_riemann = False
     if power_sensor and should_create_riemann:
         return VirtualEnergySensor(
             hass=hass,
@@ -433,7 +438,11 @@ def create_grouped_energy_sensor(
             sensor_config=sensor_config,
             entity_category=sensor_config.get(CONF_ENERGY_SENSOR_CATEGORY),
             unit_prefix=sensor_config.get(CONF_ENERGY_SENSOR_UNIT_PREFIX, UnitPrefix.NONE),
-            group_statistics=GroupEnergyStatistics(hass, sensor_config, energy_sensor_ids, power_sensor),
+            group_statistics=(
+                GroupEnergyStatistics(hass, sensor_config, energy_sensor_ids, power_sensor)
+                if group_type == GroupType.CUSTOM
+                else None
+            ),
         )
 
     return GroupedEnergySensor(
@@ -444,6 +453,7 @@ def create_grouped_energy_sensor(
         sensor_config=sensor_config,
         group_type=group_type,
         entity_id=entity_id,
+        member_weights=member_weights,
     )
 
 
@@ -468,6 +478,7 @@ class GroupedSensor(BaseEntity, SensorEntity):
         sensor_config: dict[str, Any],
         group_type: GroupType,
         unique_id: str | None = None,
+        member_weights: dict[str, int] | None = None,
     ) -> None:
         self.entity_id = entity_id
 
@@ -475,6 +486,7 @@ class GroupedSensor(BaseEntity, SensorEntity):
         # Remove own entity from entities, when it happens to be there. To prevent recursion
         entities.discard(entity_id)
         self._entities = entities
+        self._member_weights = member_weights or {}
         self._sensor_config = sensor_config
         if self._is_energy_sensor:
             self._rounding_digits = int(
@@ -769,7 +781,10 @@ class GroupedPowerSensor(GroupedSensor, PowerSensor):
         if not self._member_states:
             return Decimal(0) if self._ignore_unavailable_state else STATE_UNAVAILABLE
 
-        return Decimal(sum(self._member_states.values()))
+        return sum(
+            (value * self._member_weights.get(entity_id, 1) for entity_id, value in self._member_states.items()),
+            Decimal(0),
+        )
 
 
 class GroupedEnergySensor(GroupedSensor, RestoreSensor, EnergySensor):
@@ -788,6 +803,7 @@ class GroupedEnergySensor(GroupedSensor, RestoreSensor, EnergySensor):
         sensor_config: dict[str, Any],
         group_type: GroupType,
         unique_id: str | None = None,
+        member_weights: dict[str, int] | None = None,
     ) -> None:
         super().__init__(
             hass,
@@ -797,6 +813,7 @@ class GroupedEnergySensor(GroupedSensor, RestoreSensor, EnergySensor):
             sensor_config,
             group_type,
             unique_id,
+            member_weights,
         )
 
         self._attr_native_unit_of_measurement = ENERGY_UNIT_PREFIX_MAPPING.get(
@@ -804,13 +821,17 @@ class GroupedEnergySensor(GroupedSensor, RestoreSensor, EnergySensor):
             UnitOfEnergy.WATT_HOUR,
         )
         self._prev_state_store: PreviousStateStore = PreviousStateStore(hass)
-        self._group_statistics = GroupEnergyStatistics(hass, sensor_config, entities)
-        self._group_statistics.set_target(entity_id)
+        self._group_statistics: GroupEnergyStatistics | None = None
+        if group_type in [GroupType.CUSTOM, GroupType.DIFFERENCE]:
+            self._group_statistics = GroupEnergyStatistics(hass, sensor_config, entities, member_weights=member_weights)
+            self._group_statistics.set_target(entity_id)
 
     async def async_added_to_hass(self) -> None:
         """Register state listeners."""
 
         self._prev_state_store = await PreviousStateStore.async_get_instance(self.hass)
+        # Clean up any entities that are no longer part of the group
+        self._prev_state_store.cleanup_entity_states(self.entity_id, self._entities)
 
         await self.restore_last_state()
 
@@ -838,11 +859,8 @@ class GroupedEnergySensor(GroupedSensor, RestoreSensor, EnergySensor):
 
     async def on_start(self, _: HomeAssistant) -> None:
         await super().on_start(_)
-        # Domain membership must be resolved before removing previous member states.
-        self._prev_state_store.cleanup_entity_states(self.entity_id, self._entities)
-        # Domain group membership is populated during startup.
-        self._group_statistics.set_members(self._entities)
-        await self._group_statistics.async_initialize(self)
+        if self._group_statistics:
+            await self._group_statistics.async_initialize(self)
 
     async def async_calibrate(self, value: str) -> None:
         _LOGGER.debug("%s: Calibrate group energy sensor to: %s", self.entity_id, value)
@@ -926,7 +944,7 @@ class GroupedEnergySensor(GroupedSensor, RestoreSensor, EnergySensor):
             )
             return Decimal(0)
 
-        return delta
+        return delta * self._member_weights.get(state.entity_id, 1)
 
     async def restore_last_state(self) -> None:
         """Restore the last known state of the group sensor."""

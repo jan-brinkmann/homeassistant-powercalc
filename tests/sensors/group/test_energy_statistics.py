@@ -17,13 +17,16 @@ from homeassistant.const import (
     ATTR_DEVICE_CLASS,
     ATTR_UNIT_OF_MEASUREMENT,
     CONF_DOMAIN,
+    CONF_ENABLED,
     CONF_ENTITY_ID,
     CONF_NAME,
+    STATE_UNKNOWN,
     UnitOfEnergy,
     UnitOfPower,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import recorder as recorder_helper
+from homeassistant.setup import async_setup_component
 import pytest
 from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
@@ -34,28 +37,45 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from custom_components.powercalc.const import (
+    CONF_BASE_DEVICE,
     CONF_CREATE_STANDBY_ENERGY_SENSOR,
+    CONF_DIFFERENCE_DEVICES,
+    CONF_DISCOVERY,
     CONF_FIXED,
     CONF_FORCE_CALCULATE_GROUP_ENERGY,
     CONF_GROUP_ENERGY_ENTITIES,
     CONF_GROUP_ENERGY_START_AT_ZERO,
+    CONF_GROUP_ENERGY_UPDATE_INTERVAL,
     CONF_GROUP_POWER_ENTITIES,
     CONF_GROUP_TYPE,
     CONF_POWER,
     CONF_SENSOR_TYPE,
     CONF_SUBTRACT_ENTITIES,
+    DATA_DOMAIN_ENTITIES,
     DOMAIN,
     ENTRY_DATA_ENERGY_ENTITY,
     ENTRY_DATA_POWER_ENTITY,
     GroupType,
     SensorType,
 )
+from custom_components.powercalc.sensors.energy import RealEnergySensor
 from custom_components.powercalc.sensors.group.energy_statistics import (
     GroupEnergyStatistics,
     resolve_energy_entity,
     sum_statistics,
 )
+from custom_components.powercalc.sensors.power import RealPowerSensor
 from tests.common import create_mock_config_entry, mock_entities_in_registry, run_powercalc_setup
+from tests.config_flow.test_global_configuration import create_mock_global_config_entry
+from tests.sensors.group.difference_common import (
+    BASE_DEVICE,
+    BASE_ENERGY,
+    FIRST_DEVICE,
+    FIRST_ENERGY,
+    SECOND_DEVICE,
+    SECOND_ENERGY,
+    prepare_difference_devices,
+)
 
 START = datetime(2026, 10, 8, tzinfo=UTC)
 CREATED = START + timedelta(days=2, minutes=15)
@@ -129,6 +149,8 @@ async def prepare_members(hass: HomeAssistant) -> None:
     mock_entities_in_registry(
         hass,
         {
+            A_POWER: {"device_class": SensorDeviceClass.POWER},
+            B_POWER: {"device_class": SensorDeviceClass.POWER},
             A_ENERGY: {"device_class": SensorDeviceClass.ENERGY},
             B_ENERGY: {"device_class": SensorDeviceClass.ENERGY},
         },
@@ -149,11 +171,18 @@ async def prepare_members(hass: HomeAssistant) -> None:
 
 
 @pytest.mark.parametrize(
-    "group_type,force_integral",
-    [(GroupType.CUSTOM, False), (GroupType.DOMAIN, False), (GroupType.SUBTRACT, False), (GroupType.CUSTOM, True)],
+    "force_integral,include_energy_entities",
+    [
+        (False, True),
+        (True, True),
+        (False, False),
+    ],
 )
 async def test_import_group_history(
-    hass: HomeAssistant, recorder_mock: Recorder, group_type: GroupType, force_integral: bool
+    hass: HomeAssistant,
+    recorder_mock: Recorder,
+    force_integral: bool,
+    include_energy_entities: bool,
 ) -> None:
     recorder_mock.engine.echo = False
     with freeze_time(CREATED) as freezer:
@@ -164,31 +193,23 @@ async def test_import_group_history(
             hass,
             {
                 CONF_SENSOR_TYPE: SensorType.GROUP,
-                CONF_GROUP_TYPE: group_type,
+                CONF_GROUP_TYPE: GroupType.CUSTOM,
                 CONF_NAME: "History",
-                CONF_GROUP_ENERGY_ENTITIES: [A_ENERGY, B_ENERGY],
+                CONF_GROUP_ENERGY_ENTITIES: [A_ENERGY, B_ENERGY] if include_energy_entities else [],
                 CONF_GROUP_POWER_ENTITIES: [A_POWER, B_POWER],
                 CONF_GROUP_ENERGY_START_AT_ZERO: False,
                 CONF_FORCE_CALCULATE_GROUP_ENERGY: force_integral,
-                CONF_DOMAIN: "all",
-                CONF_ENTITY_ID: A_POWER,
-                CONF_SUBTRACT_ENTITIES: [B_POWER],
             },
         )
         await async_wait_recording_done(hass)
-        weight = -1 if group_type == GroupType.SUBTRACT else 1
-        initial = 13 + 0.2 * weight
+        initial = 13.2
         assert float(hass.states.get(TARGET).state) == pytest.approx(initial)
 
         rows = await recorder_mock.async_add_executor_job(
             partial(statistics_during_period, hass, START, statistic_ids={TARGET}, period="hour")
         )
-        assert [row["state"] for row in rows[TARGET]] == pytest.approx(
-            [10 + 0.4 * weight, 11 + 0.4 * weight, 12 + 0.1 * weight]
-        )
-        assert [row["sum"] for row in rows[TARGET]] == pytest.approx(
-            [1 + 0.05 * weight, 2 + 0.05 * weight, 3 + 0.45 * weight]
-        )
+        assert [row["state"] for row in rows[TARGET]] == pytest.approx([10.4, 11.4, 12.1])
+        assert [row["sum"] for row in rows[TARGET]] == pytest.approx([1.05, 2.05, 3.45])
 
         # A reload must neither repeat the import nor recalibrate the live sensor.
         with patch(
@@ -200,11 +221,11 @@ async def test_import_group_history(
         assert float(hass.states.get(TARGET).state) == pytest.approx(initial)
 
         freezer.move_to(CREATED + timedelta(minutes=30))
-        if force_integral or group_type == GroupType.SUBTRACT:
+        if force_integral or not include_energy_entities:
             hass.states.async_set(
                 A_POWER, 1200, {ATTR_UNIT_OF_MEASUREMENT: UnitOfPower.WATT, ATTR_DEVICE_CLASS: SensorDeviceClass.POWER}
             )
-            increase = (1 + 0.2 * weight) * 0.5
+            increase = 0.6
         else:
             hass.states.async_set(A_ENERGY, 14000, {ATTR_UNIT_OF_MEASUREMENT: UnitOfEnergy.WATT_HOUR})
             increase = 1
@@ -217,7 +238,102 @@ async def test_import_group_history(
         statistics = await recorder_mock.async_add_executor_job(
             partial(statistics_during_period, hass, CREATED, statistic_ids={TARGET}, period="5minute")
         )
-        assert statistics[TARGET][-1]["sum"] == pytest.approx(4 + 0.55 * weight + increase)
+        assert statistics[TARGET][-1]["sum"] == pytest.approx(4.55 + increase)
+
+
+async def test_subtract_group_does_not_inherit_history(hass: HomeAssistant, recorder_mock: Recorder) -> None:
+    """Subtract groups keep integrating power, even with the former opt-in setting."""
+    recorder_mock.engine.echo = False
+    with freeze_time(CREATED) as freezer:
+        await hass.async_start()
+        await create_mock_global_config_entry(hass, {CONF_DISCOVERY: {CONF_ENABLED: False}})
+        await prepare_members(hass)
+        await import_member_history(hass)
+        with patch(
+            "custom_components.powercalc.sensors.group.energy_statistics.GroupEnergyStatistics.async_initialize",
+            new_callable=AsyncMock,
+        ) as initialize:
+            await create_mock_config_entry(
+                hass,
+                {
+                    CONF_SENSOR_TYPE: SensorType.GROUP,
+                    CONF_GROUP_TYPE: GroupType.SUBTRACT,
+                    CONF_NAME: "History",
+                    CONF_ENTITY_ID: A_POWER,
+                    CONF_SUBTRACT_ENTITIES: [B_POWER],
+                    CONF_GROUP_ENERGY_START_AT_ZERO: False,
+                },
+            )
+            initialize.assert_not_awaited()
+        assert hass.states.get(TARGET).state == STATE_UNKNOWN
+        await async_wait_recording_done(hass)
+        statistics = await recorder_mock.async_add_executor_job(
+            partial(statistics_during_period, hass, START, statistic_ids={TARGET}, period="hour")
+        )
+        assert statistics == {}
+
+        freezer.move_to(CREATED + timedelta(minutes=30))
+        hass.states.async_set(
+            A_POWER, 1200, {ATTR_UNIT_OF_MEASUREMENT: UnitOfPower.WATT, ATTR_DEVICE_CLASS: SensorDeviceClass.POWER}
+        )
+        await hass.async_block_till_done()
+        assert float(hass.states.get(TARGET).state) == pytest.approx(0.4)
+
+
+@pytest.mark.parametrize("domain", ["all", "light"])
+async def test_domain_group_does_not_inherit_history(hass: HomeAssistant, recorder_mock: Recorder, domain: str) -> None:
+    """Both domain group strategies keep their original state calculation without importing history."""
+    recorder_mock.engine.echo = False
+    with freeze_time(CREATED) as freezer:
+        await hass.async_start()
+        await create_mock_global_config_entry(hass, {CONF_DISCOVERY: {CONF_ENABLED: False}})
+        assert await async_setup_component(hass, DOMAIN, {})
+        await prepare_members(hass)
+        await import_member_history(hass)
+        hass.data[DOMAIN][DATA_DOMAIN_ENTITIES]["light"] = [
+            RealPowerSensor(A_POWER, UnitOfPower.WATT),
+            RealPowerSensor(B_POWER, UnitOfPower.WATT),
+            RealEnergySensor(A_ENERGY),
+            RealEnergySensor(B_ENERGY),
+        ]
+        with patch(
+            "custom_components.powercalc.sensors.group.energy_statistics.GroupEnergyStatistics.async_initialize",
+            new_callable=AsyncMock,
+        ) as initialize:
+            await create_mock_config_entry(
+                hass,
+                {
+                    CONF_SENSOR_TYPE: SensorType.GROUP,
+                    CONF_GROUP_TYPE: GroupType.DOMAIN,
+                    CONF_DOMAIN: domain,
+                    CONF_NAME: "History",
+                    # A previously saved opt-in must not activate a statistics import.
+                    CONF_GROUP_ENERGY_START_AT_ZERO: False,
+                },
+            )
+            initialize.assert_not_awaited()
+        if domain == "all":
+            # The shared energy counter already accepted this YAML setting on master.
+            assert float(hass.states.get(TARGET).state) == pytest.approx(13.2)
+        else:
+            assert hass.states.get(TARGET).state == STATE_UNKNOWN
+        await async_wait_recording_done(hass)
+        statistics = await recorder_mock.async_add_executor_job(
+            partial(statistics_during_period, hass, START, statistic_ids={TARGET}, period="hour")
+        )
+        assert statistics == {}
+
+        freezer.move_to(CREATED + timedelta(minutes=30))
+        if domain == "all":
+            hass.states.async_set(A_ENERGY, 14000, {ATTR_UNIT_OF_MEASUREMENT: UnitOfEnergy.WATT_HOUR})
+            expected = 14.2
+        else:
+            hass.states.async_set(
+                A_POWER, 1200, {ATTR_UNIT_OF_MEASUREMENT: UnitOfPower.WATT, ATTR_DEVICE_CLASS: SensorDeviceClass.POWER}
+            )
+            expected = 0.6
+        await hass.async_block_till_done()
+        assert float(hass.states.get(TARGET).state) == pytest.approx(expected)
 
 
 async def test_start_at_zero_does_not_import(hass: HomeAssistant) -> None:
@@ -238,6 +354,85 @@ async def test_missing_energy_link_does_not_import(hass: HomeAssistant) -> None:
     with patch("custom_components.powercalc.sensors.group.energy_statistics.get_instance") as recorder:
         await history.async_initialize(AsyncMock())
         recorder.assert_not_called()
+
+
+@pytest.mark.parametrize("start_at_zero", [True, False])
+async def test_difference_group_statistics(hass: HomeAssistant, recorder_mock: Recorder, start_at_zero: bool) -> None:
+    recorder_mock.engine.echo = False
+    with freeze_time(CREATED) as freezer:
+        await hass.async_start()
+        await create_mock_global_config_entry(hass, {CONF_DISCOVERY: {CONF_ENABLED: False}})
+        prepare_difference_devices(hass)
+        for entity_id, unit, values in [
+            (BASE_ENERGY, UnitOfEnergy.WATT_HOUR, [[100000, 10000], [101000, 11000]]),
+            (FIRST_ENERGY, UnitOfEnergy.KILO_WATT_HOUR, [[20, 2], [20.1, 2.1]]),
+            (SECOND_ENERGY, UnitOfEnergy.WATT_HOUR, [[10000, 1000], [10200, 1200]]),
+        ]:
+            metadata: StatisticMetaData = {
+                "statistic_id": entity_id,
+                "source": "recorder",
+                "name": None,
+                "unit_of_measurement": unit,
+                "unit_class": "energy",
+                "mean_type": StatisticMeanType.NONE,
+                "has_sum": True,
+            }
+            async_import_statistics(
+                hass,
+                metadata,
+                [
+                    {"start": START + timedelta(hours=hour), "state": value[0], "sum": value[1]}
+                    for hour, value in enumerate(values)
+                ],
+            )
+        hass.states.async_set(BASE_ENERGY, 102000, {ATTR_UNIT_OF_MEASUREMENT: UnitOfEnergy.WATT_HOUR})
+        hass.states.async_set(FIRST_ENERGY, 20.2, {ATTR_UNIT_OF_MEASUREMENT: UnitOfEnergy.KILO_WATT_HOUR})
+        hass.states.async_set(SECOND_ENERGY, 10300, {ATTR_UNIT_OF_MEASUREMENT: UnitOfEnergy.WATT_HOUR})
+        await async_wait_recording_done(hass)
+
+        entry = await create_mock_config_entry(
+            hass,
+            {
+                CONF_SENSOR_TYPE: SensorType.GROUP,
+                CONF_GROUP_TYPE: GroupType.DIFFERENCE,
+                CONF_NAME: "History",
+                CONF_BASE_DEVICE: BASE_DEVICE,
+                CONF_DIFFERENCE_DEVICES: [FIRST_DEVICE, SECOND_DEVICE],
+                CONF_GROUP_ENERGY_START_AT_ZERO: start_at_zero,
+                CONF_GROUP_ENERGY_UPDATE_INTERVAL: 0,
+            },
+        )
+        await async_wait_recording_done(hass)
+        initial = 0 if start_at_zero else 71.5
+        assert float(hass.states.get(TARGET).state) == pytest.approx(initial)
+        statistics = await recorder_mock.async_add_executor_job(
+            partial(statistics_during_period, hass, START, statistic_ids={TARGET}, period="hour")
+        )
+        if start_at_zero:
+            assert statistics == {}
+        else:
+            assert [row["state"] for row in statistics[TARGET]] == pytest.approx([70, 70.7])
+            assert [row["sum"] for row in statistics[TARGET]] == pytest.approx([7, 7.7])
+
+        do_adhoc_statistics(hass, start=CREATED)
+        await async_wait_recording_done(hass)
+        with patch(
+            "custom_components.powercalc.sensors.group.energy_statistics.async_import_statistics"
+        ) as import_mock:
+            assert await hass.config_entries.async_reload(entry.entry_id)
+            await hass.async_block_till_done()
+            import_mock.assert_not_called()
+        freezer.move_to(CREATED + timedelta(minutes=10))
+        hass.states.async_set(BASE_ENERGY, 103000, {ATTR_UNIT_OF_MEASUREMENT: UnitOfEnergy.WATT_HOUR})
+        hass.states.async_set(FIRST_ENERGY, 20.6, {ATTR_UNIT_OF_MEASUREMENT: UnitOfEnergy.KILO_WATT_HOUR})
+        await async_wait_recording_done(hass)
+        assert float(hass.states.get(TARGET).state) == pytest.approx(initial + 0.6)
+        do_adhoc_statistics(hass, start=CREATED + timedelta(minutes=10))
+        await async_wait_recording_done(hass)
+        statistics = await recorder_mock.async_add_executor_job(
+            partial(statistics_during_period, hass, CREATED, statistic_ids={TARGET}, period="5minute")
+        )
+        assert statistics[TARGET][-1]["sum"] == pytest.approx(0.6 if start_at_zero else 9.1)
 
 
 async def test_resolve_yaml_energy_sensor(hass: HomeAssistant) -> None:

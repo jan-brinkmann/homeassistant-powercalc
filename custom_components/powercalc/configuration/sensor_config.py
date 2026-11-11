@@ -12,6 +12,7 @@ from custom_components.powercalc.common import validate_name_pattern
 from custom_components.powercalc.const import (
     CONF_AND,
     CONF_AVAILABILITY_ENTITY,
+    CONF_BASE_DEVICE,
     CONF_CALCULATION_ENABLED_CONDITION,
     CONF_COMPOSITE,
     CONF_COST,
@@ -23,6 +24,7 @@ from custom_components.powercalc.const import (
     CONF_CUSTOM_MODEL_DIRECTORY,
     CONF_DAILY_FIXED_ENERGY,
     CONF_DELAY,
+    CONF_DIFFERENCE_DEVICES,
     CONF_DISABLE_STANDBY_POWER,
     CONF_ENERGY_FILTER_OUTLIER_ENABLED,
     CONF_ENERGY_FILTER_OUTLIER_MAX,
@@ -136,6 +138,8 @@ SENSOR_CONFIG = {
     vol.Optional(CONF_CREATE_GROUP): cv.string,
     vol.Optional(CONF_GROUP_ENERGY_START_AT_ZERO): cv.boolean,
     vol.Optional(CONF_GROUP_TYPE): vol.In([cls.value for cls in GroupType]),
+    vol.Optional(CONF_BASE_DEVICE): cv.string,
+    vol.Optional(CONF_DIFFERENCE_DEVICES): vol.All(cv.ensure_list, [cv.string]),
     vol.Optional(CONF_SUBTRACT_ENTITIES): vol.All(cv.ensure_list, [cv.entity_id]),
     vol.Optional(CONF_HIDE_MEMBERS): cv.boolean,
     vol.Optional(CONF_INCLUDE): vol.Schema(

@@ -22,7 +22,11 @@
       "lut_unsupported_color_mode": "The LUT profile does not support one of the color modes of your light. See the logs for more info",
       "lut_wrong_domain": "Only light entities can use the LUT mode",
       "playbook_mandatory": "You need to specify at least one playbook",
-      "unknown": "Unknown error occured, please see the logs for additional information"
+      "unknown": "Unknown error occured, please see the logs for additional information",
+      "difference_devices_mandatory": "Select a base device and at least one difference device.",
+      "difference_duplicate_devices": "Select each device only once. The base device cannot also be a difference device.",
+      "difference_device_sensors": "Each selected device must have at least one enabled power sensor and one enabled energy sensor.",
+      "difference_shared_sensors": "The selected devices must not share power or energy sensors."
     },
     "flow_title": "{name} ({manufacturer} {model})",
     "step": {
@@ -84,13 +88,9 @@
           "create_cost_sensor": "Create cost sensor",
           "create_utility_meters": "Create utility meters",
           "domain": "Entity domain",
-          "exclude_entities": "Exclude entities",
-          "group_energy_start_at_zero": "Start at zero"
+          "exclude_entities": "Exclude entities"
         },
-        "title": "Create a domain based group sensor",
-        "data_description": {
-          "group_energy_start_at_zero": "When enabled, the new energy sensor starts at zero. When disabled, it inherits the current energy total and available long-term statistics of its members. This only applies when the sensor is first created."
-        }
+        "title": "Create a domain based group sensor"
       },
       "fixed": {
         "data": {
@@ -298,15 +298,29 @@
           "create_utility_meters": "Create utility meters",
           "entity_id": "Base entity",
           "name": "Name",
-          "subtract_entities": "Subtract entities",
-          "group_energy_start_at_zero": "Start at zero"
+          "subtract_entities": "Subtract entities"
         },
         "data_description": {
           "entity_id": "The base entity to subtract the power from",
-          "subtract_entities": "Select all the entities you want to subtract from the base entity",
-          "group_energy_start_at_zero": "When enabled, the new energy sensor starts at zero. When disabled, it inherits the current energy total and long-term statistics of the base entity minus those of the entities to subtract. Each power sensor must have a uniquely associated energy sensor. This only applies when the sensor is first created."
+          "subtract_entities": "Select all the entities you want to subtract from the base entity"
         },
         "title": "Subtract group sensor"
+      },
+      "group_difference": {
+        "title": "Create a difference group",
+        "description": "Select a base device and the devices whose power and energy consumption should be subtracted. Each selected device must have existing power and energy sensors.",
+        "data": {
+          "name": "Name",
+          "base_device": "Base device",
+          "difference_devices": "Difference devices",
+          "group_energy_start_at_zero": "Start at zero",
+          "create_utility_meters": "Create utility meters"
+        },
+        "data_description": {
+          "base_device": "The device whose power and energy consumption form the starting point.",
+          "difference_devices": "Devices whose power and energy consumption are subtracted from the base device.",
+          "group_energy_start_at_zero": "When enabled, the energy sensor starts at zero. Otherwise, it inherits the current energy difference and the available long-term statistics once, when first created."
+        }
       },
       "group_tracked_untracked": {
         "data": {
@@ -409,6 +423,7 @@
           "group_custom": "Standard",
           "group_domain": "Domain based",
           "group_subtract": "Subtract",
+          "group_difference": "Difference group",
           "group_tracked_untracked": "Tracked/untracked power"
         },
         "title": "Choose the group type",
@@ -723,7 +738,11 @@
       "linear_mandatory": "You must supply at least one of max_power or calibrate",
       "linear_min_higher_as_max": "Max power cannot be lower than min power",
       "linear_unsupported_domain": "Entity domain not supported for linear mode. Must be one of: fan, light or mediaplayer. You can use the calibrate option however",
-      "unknown": "Unknown error occured, please see the logs for additional information"
+      "unknown": "Unknown error occured, please see the logs for additional information",
+      "difference_devices_mandatory": "Select a base device and at least one difference device.",
+      "difference_duplicate_devices": "Select each device only once. The base device cannot also be a difference device.",
+      "difference_device_sensors": "Each selected device must have at least one enabled power sensor and one enabled energy sensor.",
+      "difference_shared_sensors": "The selected devices must not share power or energy sensors."
     },
     "step": {
       "advanced_options": {
@@ -997,6 +1016,17 @@
         },
         "title": "Group options"
       },
+      "group_difference": {
+        "title": "Group options",
+        "data": {
+          "base_device": "Base device",
+          "difference_devices": "Difference devices"
+        },
+        "data_description": {
+          "base_device": "The device whose power and energy consumption form the starting point.",
+          "difference_devices": "Devices whose power and energy consumption are subtracted from the base device."
+        }
+      },
       "group_tracked_untracked": {
         "data": {
           "main_power_sensor": "Mains power sensor",
@@ -1030,6 +1060,7 @@
           "group_custom": "Group options",
           "group_domain": "Group options",
           "group_subtract": "Group options",
+          "group_difference": "Group options",
           "group_tracked_untracked": "Group options",
           "group_tracked_untracked_manual": "Tracked entities",
           "library_options": "Library options",

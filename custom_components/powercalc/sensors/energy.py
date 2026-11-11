@@ -77,7 +77,6 @@ def create_energy_sensor(
     sensor_config: ConfigType,
     power_sensor: PowerSensor,
     source_entity: SourceEntity | None = None,
-    group_statistics: GroupEnergyStatistics | None = None,
 ) -> EnergySensor:
     """Create the energy sensor entity."""
 
@@ -92,7 +91,7 @@ def create_energy_sensor(
         return energy_sensor
 
     # Create a new virtual energy sensor based on the virtual power sensor
-    return _create_virtual_energy_sensor(hass, sensor_config, power_sensor, source_entity, group_statistics)
+    return _create_virtual_energy_sensor(hass, sensor_config, power_sensor, source_entity)
 
 
 def create_standby_energy_sensor(
@@ -195,7 +194,6 @@ def _create_virtual_energy_sensor(
     sensor_config: ConfigType,
     power_sensor: PowerSensor,
     source_entity: SourceEntity | None,
-    group_statistics: GroupEnergyStatistics | None = None,
 ) -> VirtualEnergySensor:
     """Create a virtual energy sensor using riemann integral integration."""
     name = generate_energy_sensor_name(
@@ -231,7 +229,6 @@ def _create_virtual_energy_sensor(
         powercalc_source_entity=source_entity.entity_id if source_entity else None,
         powercalc_source_domain=source_entity.domain if source_entity else None,
         sensor_config=sensor_config,
-        group_statistics=group_statistics,
     )
 
 

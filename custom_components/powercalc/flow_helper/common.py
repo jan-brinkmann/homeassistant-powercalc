@@ -15,6 +15,7 @@ class Step(StrEnum):
     AVAILABILITY_ENTITY = "availability_entity"
     BASIC_OPTIONS = "basic_options"
     GROUP_CUSTOM = "group_custom"
+    GROUP_DIFFERENCE = "group_difference"
     GROUP_DOMAIN = "group_domain"
     GROUP_SUBTRACT = "group_subtract"
     GROUP_TRACKED_UNTRACKED = "group_tracked_untracked"

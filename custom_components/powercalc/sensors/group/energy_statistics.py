@@ -161,22 +161,18 @@ class GroupEnergyStatistics:
         config: ConfigType,
         energy_entities: set[str] | None = None,
         power_sensor: GroupedPowerSensor | None = None,
-        base_power_entity: str | None = None,
+        member_weights: dict[str, int] | None = None,
     ) -> None:
         self._hass = hass
         self._enabled = not config.get(CONF_GROUP_ENERGY_START_AT_ZERO, True)
         self._energy_entities = energy_entities
         self._power_sensor = power_sensor
-        self._base_power_entity = base_power_entity
+        self._member_weights = member_weights
 
     @callback
     def set_target(self, entity_id: str) -> None:
         """Remember whether the target existed before entity registration."""
         self._enabled = self._enabled and er.async_get(self._hass).async_get(entity_id) is None
-
-    @callback
-    def set_members(self, entity_ids: set[str]) -> None:
-        self._energy_entities = entity_ids
 
     async def async_initialize(
         self,
@@ -187,7 +183,7 @@ class GroupEnergyStatistics:
             return
         self._enabled = False
 
-        members = await self._async_resolve_members()
+        members = self._resolve_members()
         members.pop(sensor.entity_id, None)
         unit = sensor.native_unit_of_measurement
         if not members or unit is None or unit not in EnergyConverter.VALID_UNITS:
@@ -239,12 +235,13 @@ class GroupEnergyStatistics:
         except HomeAssistantError, SQLAlchemyError, ValueError:
             _LOGGER.exception("%s: Could not initialize group energy statistics", sensor.entity_id)
 
-    async def _async_resolve_members(self) -> dict[str, int]:
+    def _resolve_members(self) -> dict[str, int]:
+        if self._member_weights is not None:
+            return self._member_weights.copy()
         if self._energy_entities:
             return dict.fromkeys(self._energy_entities, 1)
         if self._power_sensor is None:
             return {}
-        await self._power_sensor.init_domain_group()
         members: dict[str, int] = {}
         for entity_id in self._power_sensor.entities:
             energy_entity = resolve_energy_entity(self._hass, entity_id)
@@ -253,8 +250,7 @@ class GroupEnergyStatistics:
                     "Cannot inherit group energy statistics: no unambiguous energy sensor for %s", entity_id
                 )
                 return {}
-            weight = -1 if self._base_power_entity and entity_id != self._base_power_entity else 1
-            members[energy_entity] = members.get(energy_entity, 0) + weight
+            members[energy_entity] = members.get(energy_entity, 0) + 1
         return members
 
     def _get_current_values(self, members: dict[str, int], unit: str) -> dict[str, float] | None:

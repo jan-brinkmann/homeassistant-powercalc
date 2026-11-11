@@ -33,6 +33,7 @@ from .const import (
     CONF_CREATE_COST_SENSOR,
     CONF_CREATE_UTILITY_METERS,
     CONF_ENERGY_PRICE_SENSOR,
+    CONF_GROUP_TYPE,
     CONF_MANUFACTURER,
     CONF_MODE,
     CONF_MODEL,
@@ -46,11 +47,19 @@ from .const import (
     DUMMY_ENTITY_ID,
     ENTRY_GLOBAL_CONFIG_UNIQUE_ID,
     CalculationStrategy,
+    GroupType,
     SensorType,
 )
 from .device_binding import resolve_source_device
 from .errors import ModelNotSupportedError, StrategyConfigurationError
-from .flow_helper.common import FlowType, PowercalcFormStep, Step, fill_schema_defaults, flatten_sections
+from .flow_helper.common import (
+    FlowType,
+    MaybeAwaitable,
+    PowercalcFormStep,
+    Step,
+    fill_schema_defaults,
+    flatten_sections,
+)
 from .flow_helper.flows.cost import CostConfigFlow, CostOptionsFlow
 from .flow_helper.flows.daily_energy import (
     SCHEMA_DAILY_ENERGY_OPTIONS,
@@ -646,7 +655,7 @@ class PowercalcOptionsFlow(PowercalcCommonFlow, OptionsFlow):
         schema: vol.Schema,
         step: Step,
         form_kwarg: dict[str, Any] | None = None,
-        validate: Callable[[dict[str, Any]], dict[str, str] | None] | None = None,
+        validate: Callable[[dict[str, Any]], MaybeAwaitable[dict[str, str] | None]] | None = None,
     ) -> ConfigFlowResult:
         """
         Generic handler for all the option steps.
@@ -659,7 +668,8 @@ class PowercalcOptionsFlow(PowercalcCommonFlow, OptionsFlow):
         errors: dict[str, str] | None = {}
         schema = fill_schema_defaults(schema, self.sensor_config)
         if user_input is not None:
-            errors = validate(flatten_sections(user_input, schema)) if validate else None
+            validation_result = validate(flatten_sections(user_input, schema)) if validate else None
+            errors = await validation_result if isawaitable(validation_result) else validation_result
             if not errors:
                 errors = await self.process_all_options(user_input, schema)
             if not errors:
@@ -748,9 +758,14 @@ class PowercalcOptionsFlow(PowercalcCommonFlow, OptionsFlow):
             )
 
         if self.selected_sensor_type == SensorType.GROUP:
+            energy_schema = (
+                {}
+                if self.sensor_config.get(CONF_GROUP_TYPE) == GroupType.DIFFERENCE
+                else SCHEMA_ENERGY_SENSOR_TOGGLE.schema
+            )
             return vol.Schema(
                 {
-                    **SCHEMA_ENERGY_SENSOR_TOGGLE.schema,
+                    **energy_schema,
                     **SCHEMA_COST_SENSOR_TOGGLE.schema,
                     **SCHEMA_UTILITY_METER_TOGGLE.schema,
                 },

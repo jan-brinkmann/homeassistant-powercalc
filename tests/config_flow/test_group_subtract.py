@@ -6,14 +6,12 @@ from homeassistant.const import (
     CONF_SENSOR_TYPE,
 )
 from homeassistant.core import HomeAssistant
-import pytest
 
 from custom_components.powercalc import SensorType
 from custom_components.powercalc.config_flow import Step
 from custom_components.powercalc.const import (
     CONF_CREATE_ENERGY_SENSOR,
     CONF_CREATE_UTILITY_METERS,
-    CONF_GROUP_ENERGY_START_AT_ZERO,
     CONF_GROUP_TYPE,
     CONF_SUBTRACT_ENTITIES,
     GroupType,
@@ -25,8 +23,7 @@ from tests.config_flow.common import (
 )
 
 
-@pytest.mark.parametrize("start_at_zero", [None, False])
-async def test_subtract_group_flow(hass: HomeAssistant, start_at_zero: bool | None) -> None:
+async def test_subtract_group_flow(hass: HomeAssistant) -> None:
     """Test the subtract group flow."""
     result = await select_menu_item(hass, Step.MENU_GROUP, Step.GROUP_SUBTRACT)
     assert result["type"] == data_entry_flow.FlowResultType.FORM
@@ -37,8 +34,6 @@ async def test_subtract_group_flow(hass: HomeAssistant, start_at_zero: bool | No
         CONF_SUBTRACT_ENTITIES: ["sensor.light_power"],
         CONF_CREATE_UTILITY_METERS: False,
     }
-    if start_at_zero is not None:
-        user_input[CONF_GROUP_ENERGY_START_AT_ZERO] = start_at_zero
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         user_input,
@@ -47,7 +42,6 @@ async def test_subtract_group_flow(hass: HomeAssistant, start_at_zero: bool | No
     assert result["data"] == {
         CONF_SENSOR_TYPE: SensorType.GROUP,
         CONF_GROUP_TYPE: GroupType.SUBTRACT,
-        CONF_GROUP_ENERGY_START_AT_ZERO: True if start_at_zero is None else start_at_zero,
         CONF_NAME: "My group sensor",
         CONF_CREATE_ENERGY_SENSOR: True,
         CONF_CREATE_UTILITY_METERS: False,

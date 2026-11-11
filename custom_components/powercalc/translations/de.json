@@ -22,7 +22,11 @@
       "lut_unsupported_color_mode": "Das LUT-Profil unterstützt einen der Farbmodi Ihres Lichts nicht. Siehe in die Logs für weitere Informationen",
       "lut_wrong_domain": "Nur Licht Entitäten können den LUT Modus verwenden",
       "playbook_mandatory": "Sie müssen mindestens ein Playbook angeben",
-      "unknown": "Unbekannter Fehler aufgetreten, bitte sehen in die Logs für weitere Informationen"
+      "unknown": "Unbekannter Fehler aufgetreten, bitte sehen in die Logs für weitere Informationen",
+      "difference_devices_mandatory": "Wähle ein Basisgerät und mindestens ein Differenzgerät.",
+      "difference_duplicate_devices": "Wähle jedes Gerät nur einmal aus. Das Basisgerät darf nicht zugleich ein Differenzgerät sein.",
+      "difference_device_sensors": "Jedes ausgewählte Gerät muss mindestens einen aktivierten Leistungssensor und einen aktivierten Energiesensor besitzen.",
+      "difference_shared_sensors": "Die ausgewählten Geräte dürfen keine gemeinsamen Leistungs- oder Energiesensoren verwenden."
     },
     "flow_title": "{name} ({manufacturer} {model})",
     "step": {
@@ -84,13 +88,9 @@
           "create_cost_sensor": "Kostensensor erstellen",
           "create_utility_meters": "Verbrauchszähler erstellen",
           "domain": "Entitäten-Domäne",
-          "exclude_entities": "Ausgeschlossene Entitäten",
-          "group_energy_start_at_zero": "Start at zero"
+          "exclude_entities": "Ausgeschlossene Entitäten"
         },
-        "title": "Einen Domain-basierten Gruppensensor erstellen",
-        "data_description": {
-          "group_energy_start_at_zero": "When enabled, the new energy sensor starts at zero. When disabled, it inherits the current energy total and available long-term statistics of its members. This only applies when the sensor is first created."
-        }
+        "title": "Einen Domain-basierten Gruppensensor erstellen"
       },
       "fixed": {
         "data": {
@@ -298,15 +298,29 @@
           "create_utility_meters": "Verbrauchszähler erstellen",
           "entity_id": "Basis-Entität",
           "name": "Name",
-          "subtract_entities": "Abzuziehende Entitäten",
-          "group_energy_start_at_zero": "Start at zero"
+          "subtract_entities": "Abzuziehende Entitäten"
         },
         "data_description": {
           "entity_id": "Die Basis-Entität, von der die Leistung abgezogen wird",
-          "subtract_entities": "Wählen Sie alle Entitäten aus, die Sie von der Basiseinheit abziehen möchten",
-          "group_energy_start_at_zero": "When enabled, the new energy sensor starts at zero. When disabled, it inherits the current energy total and long-term statistics of the base entity minus those of the entities to subtract. Each power sensor must have a uniquely associated energy sensor. This only applies when the sensor is first created."
+          "subtract_entities": "Wählen Sie alle Entitäten aus, die Sie von der Basiseinheit abziehen möchten"
         },
         "title": "Gruppensensor zum Subtrahieren"
+      },
+      "group_difference": {
+        "title": "Differenzgruppe erstellen",
+        "description": "Wähle ein Basisgerät und die Geräte, deren Leistungsaufnahme und Energieverbrauch davon abgezogen werden sollen. Jedes ausgewählte Gerät muss vorhandene Leistungs- und Energiesensoren besitzen.",
+        "data": {
+          "name": "Name",
+          "base_device": "Basisgerät",
+          "difference_devices": "Differenzgeräte",
+          "group_energy_start_at_zero": "Starte bei Null",
+          "create_utility_meters": "Verbrauchszähler erstellen"
+        },
+        "data_description": {
+          "base_device": "Das Gerät, dessen Leistungsaufnahme und Energieverbrauch als Ausgangspunkt dienen.",
+          "difference_devices": "Geräte, deren Leistungsaufnahme und Energieverbrauch vom Basisgerät abgezogen werden.",
+          "group_energy_start_at_zero": "Wenn aktiviert, startet der Energiesensor bei null. Andernfalls übernimmt er bei der erstmaligen Erstellung einmalig die aktuelle Energiedifferenz und die vorhandenen Langzeitstatistiken."
+        }
       },
       "group_tracked_untracked": {
         "data": {
@@ -409,6 +423,7 @@
           "group_custom": "Standardgruppe",
           "group_domain": "Domänenbasierte Gruppe",
           "group_subtract": "Subtrahieren",
+          "group_difference": "Differenzgruppe",
           "group_tracked_untracked": "Erfasste/nicht erfasste Leistung"
         },
         "title": "Wählen Sie den Gruppentyp",
@@ -723,7 +738,11 @@
       "linear_mandatory": "Sie müssen mindestens Maximale Leistung oder Kalibrierung angeben",
       "linear_min_higher_as_max": "Maximale Leistung kann nicht niedriger sein als Minimale Leistung",
       "linear_unsupported_domain": "Domäne der Entität wird für den linearen Modus nicht unterstützt. Muss einer der folgenden Werte sein: Ventilator, Licht oder Mediaplayer. Sie können jedoch die Kalibrierungsoption verwenden",
-      "unknown": "Unbekannter Fehler aufgetreten, bitte sehe in die Logs für weitere Informationen"
+      "unknown": "Unbekannter Fehler aufgetreten, bitte sehe in die Logs für weitere Informationen",
+      "difference_devices_mandatory": "Wähle ein Basisgerät und mindestens ein Differenzgerät.",
+      "difference_duplicate_devices": "Wähle jedes Gerät nur einmal aus. Das Basisgerät darf nicht zugleich ein Differenzgerät sein.",
+      "difference_device_sensors": "Jedes ausgewählte Gerät muss mindestens einen aktivierten Leistungssensor und einen aktivierten Energiesensor besitzen.",
+      "difference_shared_sensors": "Die ausgewählten Geräte dürfen keine gemeinsamen Leistungs- oder Energiesensoren verwenden."
     },
     "step": {
       "advanced_options": {
@@ -997,6 +1016,17 @@
         },
         "title": "Gruppeneinstellungen"
       },
+      "group_difference": {
+        "title": "Gruppeneinstellungen",
+        "data": {
+          "base_device": "Basisgerät",
+          "difference_devices": "Differenzgeräte"
+        },
+        "data_description": {
+          "base_device": "Das Gerät, dessen Leistungsaufnahme und Energieverbrauch als Ausgangspunkt dienen.",
+          "difference_devices": "Geräte, deren Leistungsaufnahme und Energieverbrauch vom Basisgerät abgezogen werden."
+        }
+      },
       "group_tracked_untracked": {
         "data": {
           "main_power_sensor": "Netzleistungssensor",
@@ -1030,6 +1060,7 @@
           "group_custom": "Gruppeneinstellungen",
           "group_domain": "Gruppeneinstellungen",
           "group_subtract": "Gruppeneinstellungen",
+          "group_difference": "Gruppeneinstellungen",
           "group_tracked_untracked": "Gruppeneinstellungen",
           "group_tracked_untracked_manual": "Erfasste Entitäten",
           "library_options": "Bibliotheksoptionen",

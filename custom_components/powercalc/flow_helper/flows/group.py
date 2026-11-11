@@ -20,6 +20,9 @@ from homeassistant.helpers.selector import TextSelector
 
 from custom_components.powercalc.const import (
     CONF_AREA,
+    CONF_BASE_DEVICE,
+    CONF_CREATE_ENERGY_SENSOR,
+    CONF_DIFFERENCE_DEVICES,
     CONF_EXCLUDE_ENTITIES,
     CONF_FLOOR,
     CONF_FORCE_CALCULATE_GROUP_ENERGY,
@@ -52,6 +55,10 @@ from custom_components.powercalc.flow_helper.common import (
 from custom_components.powercalc.flow_helper.schema import SCHEMA_ENERGY_SENSOR_TOGGLE, SCHEMA_UTILITY_METER_TOGGLE
 from custom_components.powercalc.group_include.include import find_entities
 from custom_components.powercalc.sensors.group.config_entry_utils import get_group_entries
+from custom_components.powercalc.sensors.group.difference import (
+    DifferenceGroupConfigurationError,
+    resolve_difference_group_members,
+)
 from custom_components.powercalc.sensors.group.tracked_untracked import find_auto_tracked_power_entities
 from custom_components.powercalc.sensors.power import PowerSensor
 from custom_components.powercalc.validation import vol
@@ -97,7 +104,6 @@ SCHEMA_GROUP_DOMAIN = vol.Schema(
         **SCHEMA_GROUP_DOMAIN_OPTIONS.schema,
         **SCHEMA_ENERGY_SENSOR_TOGGLE.schema,
         **SCHEMA_UTILITY_METER_TOGGLE.schema,
-        vol.Optional(CONF_GROUP_ENERGY_START_AT_ZERO, default=True): selector.BooleanSelector(),
     },
 )
 
@@ -126,8 +132,25 @@ SCHEMA_GROUP_SUBTRACT = vol.Schema(
         **SCHEMA_GROUP_SUBTRACT_OPTIONS.schema,
         **SCHEMA_ENERGY_SENSOR_TOGGLE.schema,
         **SCHEMA_UTILITY_METER_TOGGLE.schema,
-        vol.Optional(CONF_GROUP_ENERGY_START_AT_ZERO, default=True): selector.BooleanSelector(),
     },
+)
+
+SCHEMA_GROUP_DIFFERENCE_OPTIONS = vol.Schema(
+    {
+        vol.Required(CONF_BASE_DEVICE): selector.DeviceSelector(),
+        vol.Required(CONF_DIFFERENCE_DEVICES): vol.All(
+            selector.DeviceSelector(selector.DeviceSelectorConfig(multiple=True)), vol.Length(min=1)
+        ),
+    }
+)
+
+SCHEMA_GROUP_DIFFERENCE = vol.Schema(
+    {
+        vol.Required(CONF_NAME): str,
+        **SCHEMA_GROUP_DIFFERENCE_OPTIONS.schema,
+        vol.Optional(CONF_GROUP_ENERGY_START_AT_ZERO, default=True): selector.BooleanSelector(),
+        **SCHEMA_UTILITY_METER_TOGGLE.schema,
+    }
 )
 
 SCHEMA_GROUP_TRACKED_UNTRACKED = vol.Schema(
@@ -160,6 +183,7 @@ MENU_GROUP = [
     Step.GROUP_CUSTOM,
     Step.GROUP_DOMAIN,
     Step.GROUP_SUBTRACT,
+    Step.GROUP_DIFFERENCE,
     Step.GROUP_TRACKED_UNTRACKED,
 ]
 
@@ -168,6 +192,7 @@ GROUP_SCHEMAS: dict[GroupType, vol.Schema] = {
     GroupType.CUSTOM: SCHEMA_GROUP,
     GroupType.DOMAIN: SCHEMA_GROUP_DOMAIN,
     GroupType.SUBTRACT: SCHEMA_GROUP_SUBTRACT,
+    GroupType.DIFFERENCE: SCHEMA_GROUP_DIFFERENCE,
     GroupType.TRACKED_UNTRACKED: SCHEMA_GROUP_TRACKED_UNTRACKED,
 }
 
@@ -176,6 +201,7 @@ GROUP_STEP_MAPPING: dict[GroupType, Step] = {
     GroupType.DOMAIN: Step.GROUP_DOMAIN,
     GroupType.STANDBY: Step.GROUP_DOMAIN,
     GroupType.SUBTRACT: Step.GROUP_SUBTRACT,
+    GroupType.DIFFERENCE: Step.GROUP_DIFFERENCE,
     GroupType.TRACKED_UNTRACKED: Step.GROUP_TRACKED_UNTRACKED,
 }
 
@@ -340,6 +366,13 @@ class GroupFlow:
     def __init__(self, flow: PowercalcCommonFlow) -> None:
         self.flow = flow
 
+    async def async_validate_difference_group(self, user_input: dict[str, Any]) -> dict[str, str] | None:
+        try:
+            await resolve_difference_group_members(self.flow.hass, user_input)
+        except DifferenceGroupConfigurationError as error:
+            return {"base": error.config_flow_key}
+        return None
+
     async def async_step_assign_groups(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the flow for assigning groups."""
         group_entries = get_group_entries(self.flow.hass, GroupType.CUSTOM)
@@ -394,7 +427,7 @@ class GroupConfigFlow(GroupFlow):
         self.flow: PowercalcConfigFlow = flow
 
     async def async_step_menu_group(self, _: dict[str, Any] | None = None) -> ConfigFlowResult:
-        menu = [Step.GROUP_CUSTOM, Step.GROUP_DOMAIN, Step.GROUP_SUBTRACT, Step.GROUP_TRACKED_UNTRACKED]
+        menu = MENU_GROUP.copy()
         # Hide tracked/untracked if already present
         entry = self.flow.hass.config_entries.async_entry_for_domain_unique_id(
             DOMAIN,
@@ -413,11 +446,15 @@ class GroupConfigFlow(GroupFlow):
     ) -> ConfigFlowResult:
         resolved_schema = schema or GROUP_SCHEMAS[group_type]
 
-        def _validate(ui: dict[str, Any]) -> dict[str, Any]:
+        async def _validate(ui: dict[str, Any]) -> dict[str, Any]:
             # Flatten collapsible sections (e.g. the custom group members/options) back to flat keys.
             ui = flatten_sections(ui, resolved_schema)
             if group_type == GroupType.CUSTOM:
                 validate_group_input(ui)
+            if group_type == GroupType.DIFFERENCE:
+                if errors := await self.async_validate_difference_group(ui):
+                    raise SchemaFlowError(errors["base"])
+                ui[CONF_CREATE_ENERGY_SENSOR] = True
 
             self.flow.name = ui.get(CONF_NAME)
             self.flow.sensor_config.update(ui)
@@ -448,6 +485,9 @@ class GroupConfigFlow(GroupFlow):
 
     async def async_step_group_subtract(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return await self.handle_group_step(GroupType.SUBTRACT, user_input)
+
+    async def async_step_group_difference(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self.handle_group_step(GroupType.DIFFERENCE, user_input)
 
     async def async_step_group_tracked_untracked(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         await self.flow.async_set_unique_id(UNIQUE_ID_TRACKED_UNTRACKED)
@@ -521,6 +561,14 @@ class GroupOptionsFlow(GroupFlow):
         """Handle the group options flow."""
         return await self.flow.async_handle_options_step(user_input, SCHEMA_GROUP_SUBTRACT_OPTIONS, Step.GROUP_SUBTRACT)
 
+    async def async_step_group_difference(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self.flow.async_handle_options_step(
+            user_input,
+            SCHEMA_GROUP_DIFFERENCE_OPTIONS,
+            Step.GROUP_DIFFERENCE,
+            validate=self.async_validate_difference_group,
+        )
+
     async def async_step_group_tracked_untracked(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the group options flow."""
         schema = SCHEMA_GROUP_TRACKED_UNTRACKED
@@ -538,6 +586,8 @@ class GroupOptionsFlow(GroupFlow):
             return [Step.GROUP_DOMAIN]
         if group_type == GroupType.SUBTRACT:
             return [Step.GROUP_SUBTRACT]
+        if group_type == GroupType.DIFFERENCE:
+            return [Step.GROUP_DIFFERENCE]
         if group_type == GroupType.TRACKED_UNTRACKED:
             return [Step.GROUP_TRACKED_UNTRACKED]
         return [Step.GROUP_CUSTOM]
