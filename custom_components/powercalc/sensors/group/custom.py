@@ -860,7 +860,19 @@ class GroupedEnergySensor(GroupedSensor, RestoreSensor, EnergySensor):
     async def on_start(self, _: HomeAssistant) -> None:
         await super().on_start(_)
         if self._group_statistics:
-            await self._group_statistics.async_initialize(self)
+            await self._group_statistics.async_initialize(self, self._async_seed_energy)
+
+    @property
+    def available(self) -> bool:  # ty: ignore[invalid-property-type-override]
+        return super().available and not (self._group_statistics and self._group_statistics.pending)
+
+    async def _async_seed_energy(self, value: str) -> None:
+        """Align the imported total and all member baselines in the same event-loop turn."""
+        for entity_id in self._entities:
+            if (state := self.hass.states.get(entity_id)) is not None:
+                self._prev_state_store.set_entity_state(self.entity_id, entity_id, state)
+        self._attr_available = True
+        await self.async_calibrate(value)
 
     async def async_calibrate(self, value: str) -> None:
         _LOGGER.debug("%s: Calibrate group energy sensor to: %s", self.entity_id, value)

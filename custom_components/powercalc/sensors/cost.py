@@ -26,9 +26,11 @@ from custom_components.powercalc.const import (
     CONF_ENERGY_PRICE_SENSOR,
     CONF_ENERGY_PRICE_SURCHARGE,
     CONF_ENERGY_SENSOR_ID,
+    CONF_GROUP_TYPE,
     DEFAULT_COST_SENSOR_PRECISION,
     DOMAIN,
     DOMAIN_CONFIG,
+    GroupType,
 )
 from custom_components.powercalc.device_naming import DeviceName
 from custom_components.powercalc.unit import convert_to_decimal, parse_decimal
@@ -43,6 +45,7 @@ from .utility_meter import VirtualUtilityMeter
 
 COST_ICON = "mdi:cash"
 ATTR_LAST_ENERGY = "last_energy"
+ATTR_SOURCE_LAST_RESET = "source_last_reset"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -210,6 +213,7 @@ def create_cost_sensor(
         sensor_config=sensor_config,
         price_config=price_config,
         reset_on_source_reset=reset_on_source_reset,
+        allow_negative_deltas=sensor_config.get(CONF_GROUP_TYPE) == GroupType.DIFFERENCE,
     )
     if isinstance(energy_sensor, VirtualUtilityMeter) and energy_sensor.device_name is not None:
         meter_name = energy_sensor.device_name
@@ -245,7 +249,7 @@ class CostSensor(BaseEntity, RestoreEntity, SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL
     _attr_should_poll = False
     _attr_icon = COST_ICON
-    _unrecorded_attributes = frozenset({ATTR_LAST_ENERGY})
+    _unrecorded_attributes = frozenset({ATTR_LAST_ENERGY, ATTR_SOURCE_LAST_RESET})
 
     def __init__(
         self,
@@ -257,10 +261,13 @@ class CostSensor(BaseEntity, RestoreEntity, SensorEntity):
         unique_id: str | None = None,
         price_config: PriceConfig | None = None,
         reset_on_source_reset: bool = False,
+        allow_negative_deltas: bool = False,
     ) -> None:
         self._source_energy_entity = source_energy_entity
         self._sensor_config = sensor_config
         self._reset_on_source_reset = reset_on_source_reset
+        self._allow_negative_deltas = allow_negative_deltas
+        self._source_last_reset: str | None = None
         self._attr_name = name
         self._attr_unique_id = unique_id
         self._attr_native_unit_of_measurement = hass.config.currency
@@ -271,8 +278,7 @@ class CostSensor(BaseEntity, RestoreEntity, SensorEntity):
         self._state: Decimal = Decimal(0)
         self._last_energy: Decimal | None = None
         self._current_price: Decimal | None = self._price_config.effective_price(self._price_config.fixed_price)
-        # Only a resetting (per utility meter cycle) sensor uses last_reset; a lifetime cost
-        # sensor accumulates monotonically and leaves it None.
+        # Only a resetting (per utility meter cycle) sensor uses last_reset.
         self._attr_last_reset: datetime | None = None
         self.entity_id = entity_id
 
@@ -283,6 +289,12 @@ class CostSensor(BaseEntity, RestoreEntity, SensorEntity):
         if (state := await self.async_get_last_state()) is not None:
             self._state = parse_decimal(state) or Decimal(0)
             self._last_energy = parse_decimal(state.attributes.get(ATTR_LAST_ENERGY))
+            self._source_last_reset = state.attributes.get(ATTR_SOURCE_LAST_RESET)
+
+        if self._allow_negative_deltas and self._last_energy is None:
+            source_state = self.hass.states.get(self._source_energy_entity)
+            self._last_energy = _parse_scaled(source_state, _to_kwh_factor)
+            self._source_last_reset = source_state.attributes.get(ATTR_LAST_RESET) if source_state else None
 
         # A resetting (per utility meter cycle) cost sensor exposes last_reset so long-term
         # statistics treat each cycle reset as a new cycle rather than negative consumption.
@@ -323,39 +335,56 @@ class CostSensor(BaseEntity, RestoreEntity, SensorEntity):
     @callback
     def _handle_energy_state_change(self, event: Event[EventStateChangedData]) -> None:
         """Accumulate cost based on the delta of the energy sensor and the current price."""
-        new_energy = _parse_scaled(event.data["new_state"], _to_kwh_factor)
+        source_state = event.data["new_state"]
+        new_energy = _parse_scaled(source_state, _to_kwh_factor)
         if new_energy is None:
             return
 
         # First reading only establishes a baseline to measure deltas from.
         if self._last_energy is None:
             self._last_energy = new_energy
+            self._source_last_reset = source_state.attributes.get(ATTR_LAST_RESET) if source_state else None
             return
 
-        self._accumulate(new_energy, self._current_price)
+        self._accumulate(new_energy, self._current_price, source_state)
 
     @callback
     def _handle_price_state_change(self, event: Event[EventStateChangedData]) -> None:
         """Settle the energy consumed so far at the previous price, then adopt the new price."""
         # Recalculate the outstanding energy delta with the previously known price before switching.
         if self._last_energy is not None and self._current_price is not None:
-            current_energy = _parse_scaled(self.hass.states.get(self._source_energy_entity), _to_kwh_factor)
+            source_state = self.hass.states.get(self._source_energy_entity)
+            current_energy = _parse_scaled(source_state, _to_kwh_factor)
             if current_energy is not None:
-                self._accumulate(current_energy, self._current_price)
+                self._accumulate(current_energy, self._current_price, source_state)
 
         self._current_price = self._price_config.effective_price(
             _parse_scaled(event.data["new_state"], _price_per_kwh_factor),
         )
 
-    def _accumulate(self, new_energy: Decimal, price: Decimal | None) -> None:
+    def _accumulate(self, new_energy: Decimal, price: Decimal | None, source_state: State | None) -> None:
         """Add the cost of the consumed energy at the given price and advance the baseline."""
+        if self._allow_negative_deltas and self._reset_on_source_reset and source_state is not None:
+            source_reset = source_state.attributes.get(ATTR_LAST_RESET)
+            cycle_changed = (
+                source_reset is not None
+                and self._source_last_reset is not None
+                and source_reset != self._source_last_reset
+            )
+            self._source_last_reset = source_reset or self._source_last_reset
+            if cycle_changed and source_reset is not None:
+                self._state = Decimal(0)
+                self._last_energy = Decimal(0)
+                self._attr_last_reset = dt_util.parse_datetime(source_reset) or dt_util.utcnow()
+                self.async_write_ha_state()
+
         # Leave _last_energy untouched when no price is known, so the consumption is
         # priced once a price becomes available again.
         if price is None or self._last_energy is None:
             return
 
         delta = new_energy - self._last_energy
-        if delta < 0:
+        if delta < 0 and not self._allow_negative_deltas:
             if self._reset_on_source_reset:
                 # The source (utility meter) reset for a new cycle, start the cost cycle over.
                 self._state = Decimal(0)
@@ -403,4 +432,7 @@ class CostSensor(BaseEntity, RestoreEntity, SensorEntity):
         """Return the state attributes of the cost sensor."""
         if self._last_energy is None:
             return None
-        return {ATTR_LAST_ENERGY: str(self._last_energy)}
+        attributes = {ATTR_LAST_ENERGY: str(self._last_energy)}
+        if self._allow_negative_deltas and self._reset_on_source_reset and self._source_last_reset is not None:
+            attributes[ATTR_SOURCE_LAST_RESET] = self._source_last_reset
+        return attributes

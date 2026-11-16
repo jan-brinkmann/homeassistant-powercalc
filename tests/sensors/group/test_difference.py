@@ -1,22 +1,36 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
-from homeassistant.components.sensor import SensorDeviceClass
-from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, CONF_NAME, STATE_UNAVAILABLE, UnitOfEnergy, UnitOfPower
+from freezegun import freeze_time
+from homeassistant.components.sensor import ATTR_LAST_RESET, SensorDeviceClass
+from homeassistant.components.utility_meter.const import DAILY
+from homeassistant.const import (
+    ATTR_UNIT_OF_MEASUREMENT,
+    CONF_ENTITY_ID,
+    CONF_NAME,
+    STATE_UNAVAILABLE,
+    UnitOfEnergy,
+    UnitOfPower,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 import pytest
 
 from custom_components.powercalc.const import (
     CONF_BASE_DEVICE,
+    CONF_CREATE_COST_SENSOR,
     CONF_CREATE_ENERGY_SENSORS,
     CONF_CREATE_GROUP,
     CONF_CREATE_UTILITY_METERS,
     CONF_DIFFERENCE_DEVICES,
+    CONF_ENERGY_PRICE,
+    CONF_ENERGY_PRICE_SENSOR,
     CONF_FORCE_CALCULATE_GROUP_ENERGY,
     CONF_GROUP_ENERGY_START_AT_ZERO,
+    CONF_GROUP_ENERGY_UPDATE_INTERVAL,
     CONF_GROUP_TYPE,
     CONF_SENSOR_TYPE,
+    CONF_UTILITY_METER_TYPES,
     DATA_CONFIGURED_ENTITIES,
     DOMAIN,
     GroupType,
@@ -205,3 +219,74 @@ async def test_devices_with_shared_sensors_are_rejected(hass: HomeAssistant) -> 
         await resolve_difference_group_members(
             hass, {CONF_BASE_DEVICE: BASE_DEVICE, CONF_DIFFERENCE_DEVICES: [FIRST_DEVICE]}
         )
+
+
+@pytest.mark.parametrize("start_at_zero", [True, False])
+@pytest.mark.parametrize("dynamic_price", [True, False])
+async def test_difference_costs_use_signed_deltas(
+    hass: HomeAssistant, start_at_zero: bool, dynamic_price: bool
+) -> None:
+    with freeze_time(datetime(2026, 10, 8, 12, tzinfo=UTC)) as freezer:
+        prepare_difference_devices(hass)
+        hass.states.async_set(BASE_ENERGY, 120000, {ATTR_UNIT_OF_MEASUREMENT: UnitOfEnergy.WATT_HOUR})
+        hass.states.async_set("sensor.price", 0.3, {ATTR_UNIT_OF_MEASUREMENT: "EUR/kWh"})
+        entry = await create_mock_config_entry(
+            hass,
+            {
+                CONF_SENSOR_TYPE: SensorType.GROUP,
+                CONF_GROUP_TYPE: GroupType.DIFFERENCE,
+                CONF_NAME: "Difference",
+                CONF_BASE_DEVICE: BASE_DEVICE,
+                CONF_DIFFERENCE_DEVICES: [FIRST_DEVICE],
+                CONF_GROUP_ENERGY_START_AT_ZERO: start_at_zero,
+                CONF_GROUP_ENERGY_UPDATE_INTERVAL: 0,
+                CONF_CREATE_COST_SENSOR: True,
+                CONF_CREATE_UTILITY_METERS: True,
+                CONF_UTILITY_METER_TYPES: [DAILY],
+                **({CONF_ENERGY_PRICE_SENSOR: "sensor.price"} if dynamic_price else {CONF_ENERGY_PRICE: 0.3}),
+            },
+        )
+        cost_id = "sensor.difference_cost"
+        meter_id = "sensor.difference_energy_daily"
+        meter_cost_id = "sensor.difference_energy_daily_cost"
+        initial_reset = hass.states.get(meter_cost_id).attributes[ATTR_LAST_RESET]
+        initial = 0 if start_at_zero else 100
+        assert float(hass.states.get("sensor.difference_energy").state) == pytest.approx(initial)
+
+        for entity_id, value, unit, expected_cost in [
+            (BASE_ENERGY, 121000, UnitOfEnergy.WATT_HOUR, 0.3),
+            (FIRST_ENERGY, 22, UnitOfEnergy.KILO_WATT_HOUR, -0.3),
+            (FIRST_ENERGY, 123, UnitOfEnergy.KILO_WATT_HOUR, -30.6),
+        ]:
+            hass.states.async_set(entity_id, value, {ATTR_UNIT_OF_MEASUREMENT: unit})
+            await hass.async_block_till_done()
+            await hass.async_block_till_done()
+            assert float(hass.states.get(cost_id).state) == pytest.approx(expected_cost)
+            assert float(hass.states.get(meter_cost_id).state) == pytest.approx(expected_cost)
+            assert hass.states.get(meter_cost_id).attributes[ATTR_LAST_RESET] == initial_reset
+
+        # Restoring negative energy and costs must retain both the baseline and cycle marker.
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+        if dynamic_price:
+            hass.states.async_set("sensor.price", 0.4, {ATTR_UNIT_OF_MEASUREMENT: "EUR/kWh"})
+            await hass.async_block_till_done()
+        price = 0.4 if dynamic_price else 0.3
+        hass.states.async_set(BASE_ENERGY, 122000, {ATTR_UNIT_OF_MEASUREMENT: UnitOfEnergy.WATT_HOUR})
+        await hass.async_block_till_done()
+        await hass.async_block_till_done()
+        assert float(hass.states.get(cost_id).state) == pytest.approx(-30.6 + price)
+        assert float(hass.states.get(meter_cost_id).state) == pytest.approx(-30.6 + price)
+
+        # A real cycle reset increases a negative meter to zero, but resets its cost.
+        freezer.tick(timedelta(minutes=1))
+        await hass.services.async_call("utility_meter", "reset", {CONF_ENTITY_ID: meter_id}, blocking=True)
+        await hass.async_block_till_done()
+        assert float(hass.states.get(meter_cost_id).state) == 0
+        assert hass.states.get(meter_cost_id).attributes[ATTR_LAST_RESET] != initial_reset
+        assert float(hass.states.get(cost_id).state) == pytest.approx(-30.6 + price)
+        hass.states.async_set(BASE_ENERGY, 123000, {ATTR_UNIT_OF_MEASUREMENT: UnitOfEnergy.WATT_HOUR})
+        await hass.async_block_till_done()
+        await hass.async_block_till_done()
+        assert float(hass.states.get(meter_cost_id).state) == pytest.approx(price)
+        assert float(hass.states.get(cost_id).state) == pytest.approx(-30.6 + 2 * price)

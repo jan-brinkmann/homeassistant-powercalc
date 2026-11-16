@@ -18,10 +18,11 @@ from homeassistant.components.recorder.statistics import (
 )
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import ATTR_DEVICE_CLASS, ATTR_UNIT_OF_MEASUREMENT, CONF_ENTITY_ID
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.recorder import get_instance
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import dt as dt_util
@@ -168,6 +169,13 @@ class GroupEnergyStatistics:
         self._energy_entities = energy_entities
         self._power_sensor = power_sensor
         self._member_weights = member_weights
+        self._initializing = False
+        self._cancel_wait: CALLBACK_TYPE | None = None
+
+    @property
+    def pending(self) -> bool:
+        """Keep partial totals out of recorder until the history baseline is aligned."""
+        return self._enabled or self._initializing
 
     @callback
     def set_target(self, entity_id: str) -> None:
@@ -187,61 +195,88 @@ class GroupEnergyStatistics:
         members.pop(sensor.entity_id, None)
         unit = sensor.native_unit_of_measurement
         if not members or unit is None or unit not in EnergyConverter.VALID_UNITS:
+            sensor.async_write_ha_state()
             return
 
-        try:
-            current_values = self._get_current_values(members, unit)
-            if calibrate and current_values is not None:
-                await calibrate(str(sum(value * members[entity_id] for entity_id, value in current_values.items())))
+        current_values = self._get_current_values(members, unit)
+        if current_values is None:
+            # Without recorder there is no history to align; keep the group's live
+            # calculation available, including sensors without energy unit metadata.
             if RECORDER_DOMAIN not in self._hass.data:
+                sensor.async_write_ha_state()
                 return
-            recorder = get_instance(self._hass)
-            if recorder.entity_filter and not recorder.entity_filter(sensor.entity_id):
-                return
+            self._enabled = True
+            if self._cancel_wait is None:
 
-            # Freeze the seed before awaiting database I/O. Subsequent live updates
-            # are then counted by the recorder relative to this state.
-            current_state = float(str(sensor.native_value)) if sensor.native_value is not None else None
-            if current_state is None or not math.isfinite(current_state):
-                return
-            now = dt_util.utcnow()
-            aggregated = await recorder.async_add_executor_job(
-                self._read_statistics, sensor.entity_id, members, unit, now
-            )
-            if aggregated is None:
-                return
+                async def retry_initialize(_: Event[EventStateChangedData]) -> None:
+                    await self.async_initialize(sensor, calibrate)
 
-            metadata: StatisticMetaData = {
-                "statistic_id": sensor.entity_id,
-                "source": RECORDER_DOMAIN,
-                "name": None,
-                "unit_of_measurement": unit,
-                "unit_class": EnergyConverter.UNIT_CLASS,
-                "mean_type": StatisticMeanType.NONE,
-                "has_sum": True,
-            }
-            async_import_statistics(self._hass, metadata, aggregated.history)
-            # The sensor recorder continues from short-term statistics. A seed
-            # prevents its first sample from resetting the imported sum to zero.
-            seed: StatisticData = {
-                "start": now.replace(minute=now.minute // 5 * 5, second=0, microsecond=0) - timedelta(minutes=5),
-                "state": current_state,
-                "sum": aggregated.calculate_seed_sum(members, current_values),
-            }
-            recorder.async_import_statistics(metadata, [seed], StatisticsShortTerm)
-            _LOGGER.debug(
-                "%s: Imported %s hours of member energy statistics", sensor.entity_id, len(aggregated.history)
-            )
+                self._cancel_wait = async_track_state_change_event(self._hass, members, retry_initialize)
+                sensor.async_on_remove(self._cancel_member_listener)
+            return
+
+        self._cancel_member_listener()
+        self._initializing = True
+        try:
+            if calibrate:
+                await calibrate(str(sum(value * members[entity_id] for entity_id, value in current_values.items())))
+            await self._async_import(sensor, members, current_values, unit)
         except HomeAssistantError, SQLAlchemyError, ValueError:
             _LOGGER.exception("%s: Could not initialize group energy statistics", sensor.entity_id)
+        finally:
+            self._initializing = False
+            sensor.async_write_ha_state()
+
+    @callback
+    def _cancel_member_listener(self) -> None:
+        if self._cancel_wait is not None:
+            self._cancel_wait()
+            self._cancel_wait = None
+
+    async def _async_import(
+        self, sensor: SensorEntity, members: dict[str, int], current_values: dict[str, float], unit: str
+    ) -> None:
+        if RECORDER_DOMAIN not in self._hass.data:
+            return
+        recorder = get_instance(self._hass)
+        if recorder.entity_filter and not recorder.entity_filter(sensor.entity_id):
+            return
+
+        # Freeze the seed before awaiting database I/O. Subsequent live updates
+        # are then counted by the recorder relative to this state.
+        current_state = float(str(sensor.native_value)) if sensor.native_value is not None else None
+        if current_state is None or not math.isfinite(current_state):
+            return
+        now = dt_util.utcnow()
+        aggregated = await recorder.async_add_executor_job(self._read_statistics, sensor.entity_id, members, unit, now)
+        if aggregated is None:
+            return
+
+        metadata: StatisticMetaData = {
+            "statistic_id": sensor.entity_id,
+            "source": RECORDER_DOMAIN,
+            "name": None,
+            "unit_of_measurement": unit,
+            "unit_class": EnergyConverter.UNIT_CLASS,
+            "mean_type": StatisticMeanType.NONE,
+            "has_sum": True,
+        }
+        async_import_statistics(self._hass, metadata, aggregated.history)
+        # The sensor recorder continues from short-term statistics. A seed
+        # prevents its first sample from resetting the imported sum to zero.
+        seed: StatisticData = {
+            "start": now.replace(minute=now.minute // 5 * 5, second=0, microsecond=0) - timedelta(minutes=5),
+            "state": current_state,
+            "sum": aggregated.calculate_seed_sum(members, current_values),
+        }
+        recorder.async_import_statistics(metadata, [seed], StatisticsShortTerm)
+        _LOGGER.debug("%s: Imported %s hours of member energy statistics", sensor.entity_id, len(aggregated.history))
 
     def _resolve_members(self) -> dict[str, int]:
         if self._member_weights is not None:
             return self._member_weights.copy()
-        if self._energy_entities:
-            return dict.fromkeys(self._energy_entities, 1)
         if self._power_sensor is None:
-            return {}
+            return dict.fromkeys(self._energy_entities or [], 1)
         members: dict[str, int] = {}
         for entity_id in self._power_sensor.entities:
             energy_entity = resolve_energy_entity(self._hass, entity_id)
@@ -250,7 +285,8 @@ class GroupEnergyStatistics:
                     "Cannot inherit group energy statistics: no unambiguous energy sensor for %s", entity_id
                 )
                 return {}
-            members[energy_entity] = members.get(energy_entity, 0) + 1
+            # Several phase power sensors can share one device-level energy meter.
+            members[energy_entity] = 1
         return members
 
     def _get_current_values(self, members: dict[str, int], unit: str) -> dict[str, float] | None:

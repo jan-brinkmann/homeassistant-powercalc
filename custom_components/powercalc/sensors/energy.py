@@ -4,7 +4,11 @@ import inspect
 import logging
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.integration.sensor import IntegrationSensor, IntegrationSensorExtraStoredData
+from homeassistant.components.integration.sensor import (
+    IntegrationSensor,
+    IntegrationSensorExtraStoredData,
+    _IntegrationTrigger,
+)
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN, SensorDeviceClass, SensorStateClass
 from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
@@ -18,6 +22,7 @@ from homeassistant.core import HomeAssistant, State, callback
 import homeassistant.helpers.entity_registry as er
 from homeassistant.helpers.start import async_at_start
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.util import dt as dt_util
 
 from custom_components.powercalc.common import SourceEntity
 from custom_components.powercalc.const import (
@@ -375,7 +380,17 @@ class VirtualEnergySensor(IntegrationSensor, EnergySensor):
 
     async def _async_initialize_group_statistics(self, _: HomeAssistant) -> None:
         if self._group_statistics:
-            await self._group_statistics.async_initialize(self, self.async_calibrate)
+            await self._group_statistics.async_initialize(self, self._async_seed_energy)
+
+    async def _async_seed_energy(self, value: str) -> None:
+        """Integrate only time after the inherited member readings were sampled."""
+        self._last_integration_time = dt_util.utcnow()
+        self._last_integration_trigger = _IntegrationTrigger.TimeElapsed
+        await self.async_calibrate(value)
+
+    @property
+    def available(self) -> bool:  # ty: ignore[invalid-property-type-override]
+        return super().available and not (self._group_statistics and self._group_statistics.pending)
 
     def _integrate_on_state_change(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Override to add outlier filtering.
